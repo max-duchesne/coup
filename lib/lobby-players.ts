@@ -21,15 +21,35 @@ export async function fetchLobbyPlayers(
   return data ?? [];
 }
 
-/** Join or rejoin a lobby. Preserves `is_ready` on conflict (column omitted). */
+/**
+ * Join or rejoin a lobby.
+ *
+ * Same game code (page refresh / brief disconnect): preserves `is_ready` and
+ * `joined_at` so the player's state and host order are unchanged.
+ *
+ * Different game code (new game after a previous one): resets `is_ready` to
+ * false and refreshes `joined_at` to now(), so host order reflects who
+ * actually joined first in the new lobby.
+ */
 export async function upsertLobbyPlayer(
   player: Pick<LobbyPlayer, "id" | "game_code" | "name">,
 ): Promise<void> {
+  const { data: existing } = await supabase
+    .from("players")
+    .select("game_code")
+    .eq("id", player.id)
+    .maybeSingle();
+
+  const isNewGame = !existing || existing.game_code !== player.game_code;
+
   const { error } = await supabase.from("players").upsert(
     {
       id: player.id,
       game_code: player.game_code,
       name: player.name,
+      ...(isNewGame
+        ? { is_ready: false, joined_at: new Date().toISOString() }
+        : {}),
     },
     { onConflict: "id" },
   );

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { usePlayer } from "@/lib/player";
+import { startGame } from "@/lib/game";
 import {
   fetchLobbyPlayers,
   removeLobbyPlayer,
@@ -35,6 +36,17 @@ export default function LobbyPage() {
   const [onlineIds, setOnlineIds] = useState<ReadonlySet<string>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [readyPending, setReadyPending] = useState(false);
+  const [startPending, setStartPending] = useState(false);
+
+  // Prevent double-navigation when both the subscription event and a direct
+  // router.push could fire around the same time.
+  const navigatingRef = useRef(false);
+
+  const navigateToGame = useCallback(() => {
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
+    router.push(`/${gameCode}/game`);
+  }, [gameCode, router]);
 
   const refreshPlayers = useCallback(async () => {
     const rows = await fetchLobbyPlayers(gameCode);
@@ -42,7 +54,7 @@ export default function LobbyPage() {
     setLoadError(null);
   }, [gameCode]);
 
-  // DB channel — seat list + ready state
+  // DB channel — seat list, ready state, and game-start detection
   useEffect(() => {
     if (!playerId) return;
     if (!playerName) {
@@ -72,13 +84,19 @@ export default function LobbyPage() {
         { event: "*", schema: "public", table: "players", filter: `game_code=eq.${gameCode}` },
         () => { void refreshPlayers(); },
       )
+      // Navigate ALL players (including host) when the games row is inserted.
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "games", filter: `game_code=eq.${gameCode}` },
+        () => { navigateToGame(); },
+      )
       .subscribe((next) => { setDbStatus(next as ConnectionStatus); });
 
     return () => {
       cancelled = true;
       supabase.removeChannel(dbChannel);
     };
-  }, [gameCode, playerId, playerName, refreshPlayers, router]);
+  }, [gameCode, navigateToGame, playerId, playerName, refreshPlayers, router]);
 
   // Presence channel — online/offline tracking only
   useEffect(() => {
@@ -116,8 +134,6 @@ export default function LobbyPage() {
 
   const hostId = players[0]?.id;
   const isHost = Boolean(hostId && hostId === playerId);
-
-  // A player counts toward allReady only if they currently have a live socket
   const allReady =
     players.length > 0 &&
     players.every((p) => onlineIds.has(p.id) && p.is_ready);
@@ -131,6 +147,19 @@ export default function LobbyPage() {
       setLoadError(err instanceof Error ? err.message : "Failed to update ready status");
     } finally {
       setReadyPending(false);
+    }
+  };
+
+  const handleStartGame = async () => {
+    if (!isHost || !allReady || startPending) return;
+    setStartPending(true);
+    try {
+      await startGame(gameCode, players.map((p) => p.id));
+      // Navigation is driven by the games INSERT subscription above,
+      // which fires for all players (including this host) uniformly.
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to start game");
+      setStartPending(false);
     }
   };
 
@@ -201,7 +230,13 @@ export default function LobbyPage() {
 
       {allReady && isHost && (
         <section style={{ marginTop: 24 }}>
-          <button type="button">Start Game</button>
+          <button
+            type="button"
+            disabled={startPending}
+            onClick={() => void handleStartGame()}
+          >
+            {startPending ? "Starting…" : "Start Game"}
+          </button>
         </section>
       )}
 
