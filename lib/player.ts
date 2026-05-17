@@ -15,12 +15,12 @@ let initialized = false;
 
 function ensureInitialized() {
   if (initialized || typeof window === "undefined") return;
-  let id = window.sessionStorage.getItem(ID_KEY);
+  let id = window.localStorage.getItem(ID_KEY);
   if (!id) {
     id = crypto.randomUUID();
-    window.sessionStorage.setItem(ID_KEY, id);
+    window.localStorage.setItem(ID_KEY, id);
   }
-  const name = window.sessionStorage.getItem(NAME_KEY) ?? "";
+  const name = window.localStorage.getItem(NAME_KEY) ?? "";
   snapshot = { id, name };
   initialized = true;
 }
@@ -42,9 +42,10 @@ function getServerSnapshot(): Player {
 }
 
 /**
- * Returns the per-tab player identity. Identity is generated on first read
- * and persisted in `sessionStorage` (so a tab refresh keeps the same id, but
- * each browser window/tab is a distinct player).
+ * Returns the player identity for this browser. Identity is generated on first
+ * read and persisted in `localStorage` so it survives page refreshes and tab
+ * closes. Two different physical browsers (or an incognito session after all
+ * incognito windows have been closed) will produce different IDs.
  *
  * During SSR / hydration, returns `{ id: "", name: "" }`. Gate any
  * presence-channel work on `player.id !== ""`.
@@ -55,7 +56,7 @@ export function usePlayer(): Player {
 
 export function setPlayerName(name: string) {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(NAME_KEY, name);
+  window.localStorage.setItem(NAME_KEY, name);
   ensureInitialized();
   snapshot = { ...snapshot, name };
   listeners.forEach((l) => l());
