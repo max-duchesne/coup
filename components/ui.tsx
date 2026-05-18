@@ -319,7 +319,7 @@ export function Wordmark({
           color: M.text,
         }}
       >
-        COUP
+        MULE KOUP
       </div>
       {sub && (
         <div

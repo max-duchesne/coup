@@ -16,7 +16,7 @@ const crimson = Crimson_Text({
 });
 
 export const metadata: Metadata = {
-  title: "Coup",
+  title: "Mule Koup",
   description: "An online alternative to the card game Coup.",
 };
 
