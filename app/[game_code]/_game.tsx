@@ -24,24 +24,23 @@ import {
   takeTax,
   ROLE_LABELS,
   type GameEvent,
+  type GamePlayer,
   type GameState,
   type PendingAction,
   type Role,
 } from "@/lib/game";
-
-const ACTION_LABELS: Record<PendingAction, string> = {
-  foreign_aid: "Foreign Aid",
-  tax: "Tax",
-  steal: "Steal",
-  assassinate: "Assassinate",
-  exchange: "Exchange",
-};
-
-/** Preposition before the target name in the action banner ("steal from Bob"). */
-const TARGET_PREPOSITION: Partial<Record<PendingAction, string>> = {
-  steal: "from",
-  assassinate: "on",
-};
+import { FONT_DISPLAY, M } from "@/lib/design";
+import {
+  Avatar,
+  Card,
+  Coin,
+  CoinPill,
+  DisplayHeading,
+  Frame,
+  Pill,
+  SmallLabel,
+  Wordmark,
+} from "@/components/ui";
 
 type ConnectionStatus =
   | "CONNECTING"
@@ -64,18 +63,31 @@ function generateGameCode(length = 4): string {
   return out;
 }
 
+const ACTION_LABELS: Record<PendingAction, string> = {
+  foreign_aid: "Foreign Aid",
+  tax: "Tax",
+  steal: "Steal",
+  assassinate: "Assassinate",
+  exchange: "Exchange",
+};
+
+const TARGET_PREPOSITION: Partial<Record<PendingAction, string>> = {
+  steal: "from",
+  assassinate: "on",
+};
+
 function formatLogEntry(event: GameEvent): string {
   const n = event.playerName;
   const t = event.metadata?.targetName;
   switch (event.action) {
     case "income":
-      return `${n} took income (+1 coin).`;
+      return `${n} took income (+1).`;
     case "foreign_aid":
-      return `${n} took foreign aid (+2 coins).`;
+      return `${n} took foreign aid (+2).`;
     case "tax":
-      return `${n} collected tax (+3 coins).`;
+      return `${n} took tax (+3).`;
     case "steal":
-      return `${n} stole ${event.metadata?.amount ?? 2} coin(s) from ${t ?? "someone"}.`;
+      return `${n} stole ${event.metadata?.amount ?? 2} from ${t ?? "someone"}.`;
     case "assassinate":
       return `${n} assassinated ${t ?? "someone"}.`;
     case "exchange":
@@ -93,12 +105,11 @@ function formatLogEntry(event: GameEvent): string {
         ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
         : "the claim";
       const isBlock = event.metadata?.isBlock === true;
-      // success === true means the challenger correctly identified a bluff.
       const success = event.metadata?.success === true;
       const claimDescriptor = isBlock ? `${role} block` : `${role} claim`;
       return success
-        ? `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — ${t ?? "they"} was bluffing.`
-        : `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — ${t ?? "they"} had it. ${n} loses an influence.`;
+        ? `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — bluff exposed.`
+        : `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — ${t ?? "they"} had it.`;
     }
     case "block": {
       const role = event.metadata?.role
@@ -112,7 +123,7 @@ function formatLogEntry(event: GameEvent): string {
     case "eliminated":
       return `${n} is out.`;
     case "win":
-      return `${n} wins!`;
+      return `${n} wins.`;
     default:
       return `${n}: ${event.action}`;
   }
@@ -138,7 +149,7 @@ export default function GameView() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [nextGamePending, setNextGamePending] = useState(false);
 
-  // Exchange selection: keys are "held-{influenceId}" or "drawn-{index}"
+  // Exchange selection: keys are "held-{influenceId}" or "drawn-{index}".
   const [exchangeSelection, setExchangeSelection] = useState<Set<string>>(
     new Set(),
   );
@@ -175,14 +186,26 @@ export default function GameView() {
 
     const dbChannel = supabase
       .channel(`game-db:${gameCode}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "games", filter: `game_code=eq.${gameCode}` },
-        () => { void refreshGameState(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "game_players", filter: `game_code=eq.${gameCode}` },
-        () => { void refreshGameState(); })
-      .on("postgres_changes", { event: "*", schema: "public", table: "player_influences", filter: `game_code=eq.${gameCode}` },
-        () => { void refreshGameState(); })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_events", filter: `game_code=eq.${gameCode}` },
-        () => { void refreshLog(); })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "games", filter: `game_code=eq.${gameCode}` },
+        () => { void refreshGameState(); },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "game_players", filter: `game_code=eq.${gameCode}` },
+        () => { void refreshGameState(); },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "player_influences", filter: `game_code=eq.${gameCode}` },
+        () => { void refreshGameState(); },
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "game_events", filter: `game_code=eq.${gameCode}` },
+        () => { void refreshLog(); },
+      )
       .subscribe((next) => { setDbStatus(next as ConnectionStatus); });
 
     return () => {
@@ -191,8 +214,9 @@ export default function GameView() {
     };
   }, [gameCode, playerId, refreshGameState, refreshLog]);
 
-  // Only treat the exchange selection as active while the exchange phase is live.
-  // This avoids needing a setState-in-effect reset.
+  // Reset exchange selection whenever we leave the exchange phase.
+  // We compute it derivedly (rather than via setState in effect) to avoid
+  // the set-state-in-effect lint rule.
   const activeExchangeSelection =
     gameState?.turnPhase === "ambassador_exchange"
       ? exchangeSelection
@@ -287,33 +311,38 @@ export default function GameView() {
   const toggleExchangeCard = (key: string, limit: number) => {
     setExchangeSelection((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else if (next.size < limit) {
-        next.add(key);
-      }
+      if (next.has(key)) next.delete(key);
+      else if (next.size < limit) next.add(key);
       return next;
     });
   };
 
-  // ── Early returns ───────────────────────────────────────────────────────────
+  // ── Early returns ─────────────────────────────────────────────────────────
 
   if (!playerId) {
     return (
-      <main style={{ padding: 24, fontFamily: "sans-serif" }}>Loading…</main>
+      <Frame>
+        <main style={{ padding: 32, color: M.muted }}>Loading…</main>
+      </Frame>
     );
   }
 
   if (!gameState) {
     return (
-      <main style={{ padding: 24, fontFamily: "sans-serif" }}>
-        <p>Connecting to game…</p>
-        <p style={{ color: "#666", fontSize: 13 }}>
-          db: <code>{dbStatus}</code> · presence: <code>{presenceStatus}</code>
-        </p>
-      </main>
+      <Frame>
+        <main style={{ padding: 32 }}>
+          <p style={{ color: M.muted }}>Connecting…</p>
+          <p style={{ color: M.muted, fontSize: 11, marginTop: 8 }}>
+            db <code style={{ color: connectionColor(dbStatus) }}>{shortStatus(dbStatus)}</code>
+            {" · "}
+            presence <code style={{ color: connectionColor(presenceStatus) }}>{shortStatus(presenceStatus)}</code>
+          </p>
+        </main>
+      </Frame>
     );
   }
+
+  // ── Derived state ─────────────────────────────────────────────────────────
 
   const {
     currentTurnPlayerId,
@@ -331,45 +360,36 @@ export default function GameView() {
   } = gameState;
 
   const me = players.find((p) => p.playerId === playerId);
-  const currentTurnPlayer = players.find(
-    (p) => p.playerId === currentTurnPlayerId,
-  );
+  const opponents = players.filter((p) => p.playerId !== playerId);
+  const currentTurnPlayer = players.find((p) => p.playerId === currentTurnPlayerId);
   const winner = players.find((p) => p.playerId === winnerId);
   const isMyTurn = currentTurnPlayerId === playerId;
   const iMustLoseInfluence =
     turnPhase === "lose_influence" && pendingTargetId === playerId;
-  const isMyExchange =
-    turnPhase === "ambassador_exchange" && isMyTurn;
+  const isMyExchange = turnPhase === "ambassador_exchange" && isMyTurn;
   const mustCoup = isMyTurn && turnPhase === "action" && (me?.coins ?? 0) >= 10;
   const canCoup = (me?.coins ?? 0) >= 7;
   const canAssassinate = (me?.coins ?? 0) >= 3;
   const canStealFrom = (p: { coins: number }) => p.coins > 0;
   const myLiveInfluences = (me?.influences ?? []).filter((i) => !i.isRevealed);
   const iAmEliminated = myLiveInfluences.length === 0;
-  const aliveOpponents = players.filter(
-    (p) =>
-      p.playerId !== playerId && p.influences.some((i) => !i.isRevealed),
+  const aliveOpponents = opponents.filter((p) =>
+    p.influences.some((i) => !i.isRevealed),
   );
 
-  // Awaiting-challenge derived state
   const iAlreadyPassed = challengePasses.includes(playerId);
   const inBlockChallenge =
     turnPhase === "awaiting_challenge" && pendingBlockerId !== null;
   const blocker = pendingBlockerId
     ? players.find((p) => p.playerId === pendingBlockerId)
     : null;
-  // The "owner" of the current claim (action or block) cannot respond to it.
   const claimOwnerId = pendingBlockerId ?? currentTurnPlayerId;
   const iAmClaimOwner = playerId === claimOwnerId;
-  // Players can pass during awaiting_challenge if they're alive, didn't make
-  // the claim, and haven't already passed.
   const iCanRespond =
     turnPhase === "awaiting_challenge" &&
     !iAmClaimOwner &&
     !iAmEliminated &&
     !iAlreadyPassed;
-  // Challenge button hides when the claim has no role to challenge
-  // (foreign_aid action — only the block on it is challengeable).
   const claimHasRole = inBlockChallenge
     ? pendingBlockRole !== null
     : pendingAction !== null && ACTION_CLAIMED_ROLE[pendingAction] !== null;
@@ -381,16 +401,15 @@ export default function GameView() {
     ? players.find((p) => p.playerId === pendingActionTargetId)
     : null;
 
-  // Ambassador exchange pool
   const exchangePool: { key: string; label: string; role: Role }[] = [
     ...myLiveInfluences.map((i) => ({
       key: `held-${i.id}`,
-      label: `Your card: ${ROLE_LABELS[i.role]}`,
+      label: ROLE_LABELS[i.role],
       role: i.role,
     })),
     ...(pendingAmbassadorDraw ?? []).map((role, idx) => ({
       key: `drawn-${idx}`,
-      label: `Drawn: ${ROLE_LABELS[role]}`,
+      label: ROLE_LABELS[role],
       role,
     })),
   ];
@@ -402,365 +421,799 @@ export default function GameView() {
     void wrap(() => resolveExchange(gameCode, playerId, kept));
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <main style={{ padding: 24, fontFamily: "sans-serif" }}>
-      {/* Header */}
-      <header style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0 }}>{gameCode}</h1>
-        <span style={{ color: "#666", fontSize: 13 }}>
-          db: <code>{dbStatus}</code> · presence: <code>{presenceStatus}</code>
-        </span>
+    <Frame>
+      {/* Top bar */}
+      <header
+        style={{
+          padding: "20px 32px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: `1px solid ${M.border}`,
+        }}
+      >
+        <Wordmark size={18} sub={`Room · ${gameCode}`} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            fontSize: 11,
+            color: M.muted,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+          }}
+        >
+          <span>
+            db <code style={{ color: connectionColor(dbStatus) }}>{shortStatus(dbStatus)}</code>
+          </span>
+          <span style={{ opacity: 0.4 }}>·</span>
+          <span>
+            presence <code style={{ color: connectionColor(presenceStatus) }}>{shortStatus(presenceStatus)}</code>
+          </span>
+          <Pill size="sm" onClick={() => router.push("/")}>
+            Leave
+          </Pill>
+        </div>
       </header>
 
-      {actionError && (
-        <p style={{ color: "crimson", marginTop: 12 }}>{actionError}</p>
-      )}
-
-      {/* Player list */}
-      <section style={{ marginTop: 20 }}>
-        <h2 style={{ margin: "0 0 8px" }}>Players</h2>
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {players.map((p) => {
-            const isOnline = onlineIds.has(p.playerId);
-            const isTurn =
-              p.playerId === currentTurnPlayerId && status === "in_progress";
-            const isMe = p.playerId === playerId;
-            const isElim = p.influences.every((i) => i.isRevealed);
-            return (
-              <li
+      <main
+        style={{
+          maxWidth: 1100,
+          margin: "0 auto",
+          padding: "32px 24px 80px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 32,
+        }}
+      >
+        {/* Opponents row */}
+        {opponents.length > 0 && (
+          <section
+            style={{
+              display: "flex",
+              gap: 48,
+              flexWrap: "wrap",
+              justifyContent: "center",
+            }}
+          >
+            {opponents.map((p) => (
+              <OpponentBlock
                 key={p.playerId}
-                style={{
-                  padding: "6px 0",
-                  fontWeight: isTurn ? "bold" : "normal",
-                  color: isElim ? "#999" : isOnline ? "inherit" : "#bbb",
-                  textDecoration: isElim ? "line-through" : "none",
-                }}
-              >
-                {p.name}
-                {isMe ? " (you)" : ""}
-                {isElim
-                  ? " — out"
-                  : ` — ${p.coins} coin${p.coins !== 1 ? "s" : ""}`}
-                {isTurn ? " ← current turn" : ""}
-                {!isElim && !isOnline ? " (offline)" : ""}
-                {!isElim && (
-                  <ul style={{ listStyle: "none", padding: "4px 0 0 16px", margin: 0, fontSize: 13 }}>
-                    {p.influences.map((inf) => (
-                      <li
-                        key={inf.id}
-                        style={{ color: inf.isRevealed ? "#c00" : "inherit" }}
-                      >
-                        {isMe || inf.isRevealed ? ROLE_LABELS[inf.role] : "Hidden"}
-                        {inf.isRevealed ? " (revealed)" : ""}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </section>
+                player={p}
+                online={onlineIds.has(p.playerId)}
+                active={p.playerId === currentTurnPlayerId && status === "in_progress"}
+                isPendingTarget={
+                  status === "in_progress" &&
+                  ((turnPhase === "awaiting_challenge" &&
+                    pendingActionTargetId === p.playerId) ||
+                    pendingTargetId === p.playerId)
+                }
+                isBlocker={pendingBlockerId === p.playerId}
+              />
+            ))}
+          </section>
+        )}
 
-      {/* Action area */}
-      {status === "in_progress" && (
-        <section style={{ marginTop: 24 }}>
-          {iMustLoseInfluence ? (
+        {/* Spotlight: contextual content based on phase */}
+        <section
+          style={{
+            minHeight: 220,
+            padding: "32px 24px",
+            background: M.surface,
+            border: `1px solid ${M.border}`,
+            borderRadius: 18,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 18,
+            textAlign: "center",
+          }}
+        >
+          {actionError && (
+            <p
+              style={{
+                color: M.blood,
+                fontSize: 13,
+                letterSpacing: "0.02em",
+                margin: 0,
+              }}
+            >
+              {actionError}
+            </p>
+          )}
+
+          {status === "finished" ? (
+            <GameOverPanel
+              winner={winner}
+              isMe={winner?.playerId === playerId}
+              onQuit={() => router.push("/")}
+              onPlayAgain={() => void handlePlayAgain()}
+              nextGamePending={nextGamePending}
+            />
+          ) : iMustLoseInfluence ? (
             <>
-              <p style={{ fontWeight: "bold", marginBottom: 10 }}>
-                You must lose an influence — choose a card:
-              </p>
-              <div style={{ display: "flex", gap: 10 }}>
+              <SmallLabel color={M.blood}>Lose an influence</SmallLabel>
+              <DisplayHeading size={28}>
+                Choose a card to reveal.
+              </DisplayHeading>
+              <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
                 {myLiveInfluences.map((inf) => (
-                  <button
+                  <Card
                     key={inf.id}
-                    type="button"
-                    disabled={actionPending}
-                    onClick={() =>
-                      void wrap(() => loseInfluence(gameCode, playerId, inf.id))
+                    role={inf.role}
+                    size="md"
+                    onClick={
+                      actionPending
+                        ? undefined
+                        : () =>
+                            void wrap(() =>
+                              loseInfluence(gameCode, playerId, inf.id),
+                            )
                     }
-                  >
-                    Lose {ROLE_LABELS[inf.role]}
-                  </button>
+                    disabled={actionPending}
+                  />
                 ))}
               </div>
             </>
           ) : turnPhase === "lose_influence" ? (
-            <p style={{ color: "#666" }}>
-              Waiting for{" "}
-              {players.find((p) => p.playerId === pendingTargetId)?.name ??
-                "opponent"}{" "}
-              to choose a card to lose…
-            </p>
+            <>
+              <SmallLabel>Lose an influence</SmallLabel>
+              <DisplayHeading size={26}>
+                {players.find((p) => p.playerId === pendingTargetId)?.name ??
+                  "A player"}{" "}
+                is choosing a card.
+              </DisplayHeading>
+            </>
           ) : isMyExchange ? (
             <>
-              <p style={{ fontWeight: "bold", marginBottom: 8 }}>
-                Choose {myLiveInfluences.length} card{myLiveInfluences.length !== 1 ? "s" : ""} to keep:
-              </p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <SmallLabel color={M.gold}>Exchange</SmallLabel>
+              <DisplayHeading size={26}>
+                Keep {myLiveInfluences.length} card
+                {myLiveInfluences.length !== 1 ? "s" : ""}.
+              </DisplayHeading>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 14,
+                  flexWrap: "wrap",
+                  justifyContent: "center",
+                  marginTop: 4,
+                }}
+              >
                 {exchangePool.map((card) => {
                   const selected = activeExchangeSelection.has(card.key);
+                  const atLimit =
+                    !selected &&
+                    activeExchangeSelection.size >= myLiveInfluences.length;
                   return (
-                    <button
+                    <Card
                       key={card.key}
-                      type="button"
-                      disabled={
-                        actionPending ||
-                        (!selected &&
-                          activeExchangeSelection.size >= myLiveInfluences.length)
+                      role={card.role}
+                      size="md"
+                      selected={selected}
+                      disabled={actionPending || atLimit}
+                      onClick={
+                        actionPending || atLimit
+                          ? undefined
+                          : () =>
+                              toggleExchangeCard(card.key, myLiveInfluences.length)
                       }
-                      onClick={() =>
-                        toggleExchangeCard(card.key, myLiveInfluences.length)
-                      }
-                      style={{
-                        outline: selected ? "2px solid #0070f3" : "none",
-                        fontWeight: selected ? "bold" : "normal",
-                      }}
-                    >
-                      {card.label}
-                    </button>
+                    />
                   );
                 })}
               </div>
-              <button
-                type="button"
+              <Pill
+                accent="gold"
+                filled
                 disabled={
                   actionPending ||
                   activeExchangeSelection.size !== myLiveInfluences.length
                 }
                 onClick={() => handleResolveExchange(activeExchangeSelection)}
               >
-                Confirm ({activeExchangeSelection.size}/{myLiveInfluences.length} selected)
-              </button>
+                Keep ({activeExchangeSelection.size}/{myLiveInfluences.length})
+              </Pill>
             </>
           ) : turnPhase === "ambassador_exchange" ? (
-            <p style={{ color: "#666" }}>
-              Waiting for {currentTurnPlayer?.name ?? "someone"} to exchange
-              cards…
-            </p>
+            <>
+              <SmallLabel>Exchange</SmallLabel>
+              <DisplayHeading size={26}>
+                {currentTurnPlayer?.name ?? "A player"} is exchanging.
+              </DisplayHeading>
+            </>
           ) : turnPhase === "awaiting_challenge" && pendingAction ? (
             <>
-              {/* Banner: what's being claimed */}
+              <SmallLabel color={M.gold}>
+                {inBlockChallenge ? "Block" : "Response"}
+              </SmallLabel>
+              {/* Banner */}
               {inBlockChallenge && pendingBlockRole ? (
-                <p style={{ marginBottom: 8 }}>
-                  <strong>{blocker?.name ?? "Someone"}</strong> blocks{" "}
-                  <strong>{currentTurnPlayer?.name ?? "the actor"}</strong>
-                  &apos;s{" "}
-                  {ACTION_LABELS[pendingAction]} (claiming{" "}
-                  <strong>{ROLE_LABELS[pendingBlockRole]}</strong>).
-                </p>
+                <DisplayHeading size={26}>
+                  <span style={{ color: M.gold }}>
+                    {blocker?.name ?? "Someone"}
+                  </span>{" "}
+                  blocks{" "}
+                  <span style={{ color: M.gold }}>
+                    {currentTurnPlayer?.name ?? "the actor"}
+                  </span>
+                  &apos;s {ACTION_LABELS[pendingAction]} — claiming{" "}
+                  <span style={{ color: M.gold }}>
+                    {ROLE_LABELS[pendingBlockRole]}
+                  </span>
+                  .
+                </DisplayHeading>
               ) : pendingAction === "foreign_aid" ? (
-                <p style={{ marginBottom: 8 }}>
-                  <strong>{currentTurnPlayer?.name ?? "Someone"}</strong> takes{" "}
-                  <strong>Foreign Aid</strong>.
-                </p>
+                <DisplayHeading size={26}>
+                  <span style={{ color: M.gold }}>
+                    {currentTurnPlayer?.name ?? "Someone"}
+                  </span>{" "}
+                  takes Foreign Aid.
+                </DisplayHeading>
               ) : ACTION_CLAIMED_ROLE[pendingAction] ? (
-                <p style={{ marginBottom: 8 }}>
-                  <strong>{currentTurnPlayer?.name ?? "Someone"}</strong> claims{" "}
-                  <strong>
+                <DisplayHeading size={26}>
+                  <span style={{ color: M.gold }}>
+                    {currentTurnPlayer?.name ?? "Someone"}
+                  </span>{" "}
+                  claims{" "}
+                  <span style={{ color: M.gold }}>
                     {ROLE_LABELS[ACTION_CLAIMED_ROLE[pendingAction]!]}
-                  </strong>{" "}
+                  </span>{" "}
                   to {ACTION_LABELS[pendingAction]}
                   {pendingActionTarget
                     ? ` ${TARGET_PREPOSITION[pendingAction] ?? "on"} ${pendingActionTarget.name}`
                     : ""}
                   .
-                </p>
+                </DisplayHeading>
               ) : null}
 
+              {/* Response buttons */}
               {iCanRespond ? (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    marginTop: 6,
+                  }}
+                >
+                  <Pill
                     disabled={actionPending}
-                    onClick={() =>
-                      void wrap(() => passChallenge(gameCode, playerId))
-                    }
+                    onClick={() => void wrap(() => passChallenge(gameCode, playerId))}
                   >
-                    Pass
-                  </button>
+                    Allow
+                  </Pill>
                   {claimHasRole && (
-                    <button
-                      type="button"
+                    <Pill
+                      danger
                       disabled={actionPending}
-                      onClick={() =>
-                        void wrap(() => submitChallenge(gameCode, playerId))
-                      }
+                      onClick={() => void wrap(() => submitChallenge(gameCode, playerId))}
                     >
                       Challenge
-                    </button>
+                    </Pill>
                   )}
                   {myBlockRoles.map((role) => (
-                    <button
+                    <Pill
                       key={role}
-                      type="button"
+                      accent="gold"
                       disabled={actionPending}
-                      onClick={() =>
-                        void wrap(() => submitBlock(gameCode, playerId, role))
-                      }
+                      onClick={() => void wrap(() => submitBlock(gameCode, playerId, role))}
                     >
-                      Block with {ROLE_LABELS[role]}
-                    </button>
+                      Block · {ROLE_LABELS[role]}
+                    </Pill>
                   ))}
                 </div>
               ) : iAmClaimOwner ? (
-                <p style={{ color: "#666" }}>
-                  Waiting for opponents to respond…
-                </p>
+                <SmallLabel>Waiting for opponents.</SmallLabel>
               ) : iAmEliminated ? (
-                <p style={{ color: "#999" }}>You are out — spectating.</p>
+                <SmallLabel>You&apos;re out.</SmallLabel>
               ) : iAlreadyPassed ? (
-                <p style={{ color: "#666" }}>
-                  You passed — waiting for other players…
-                </p>
+                <SmallLabel>Allowed. Waiting for others.</SmallLabel>
               ) : null}
             </>
           ) : iAmEliminated ? (
-            <p style={{ color: "#999" }}>You are out — spectating.</p>
-          ) : isMyTurn ? (
             <>
-              {mustCoup && (
-                <p style={{ color: "crimson", marginBottom: 8 }}>
-                  You have 10+ coins — you must Coup!
-                </p>
-              )}
-              <p style={{ marginBottom: 8 }}>Your turn:</p>
-
-              {/* General actions */}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <button
-                  type="button"
-                  disabled={actionPending || mustCoup}
-                  onClick={() => void wrap(() => takeIncome(gameCode, playerId))}
-                >
-                  Income (+1)
-                </button>
-                <button
-                  type="button"
-                  disabled={actionPending || mustCoup}
-                  onClick={() =>
-                    void wrap(() => takeForeignAid(gameCode, playerId))
-                  }
-                >
-                  Foreign Aid (+2)
-                </button>
-                <button
-                  type="button"
-                  disabled={actionPending || mustCoup}
-                  onClick={() => void wrap(() => takeTax(gameCode, playerId))}
-                >
-                  Tax — Duke (+3)
-                </button>
-                <button
-                  type="button"
-                  disabled={actionPending || mustCoup}
-                  onClick={() =>
-                    void wrap(() => takeExchange(gameCode, playerId))
-                  }
-                >
-                  Exchange — Ambassador
-                </button>
-              </div>
-
-              {/* Per-opponent actions */}
-              {aliveOpponents.map((target) => (
-                <div
-                  key={target.playerId}
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    marginBottom: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <span style={{ minWidth: 80, fontSize: 13, color: "#555" }}>
-                    vs {target.name}:
-                  </span>
-                  <button
-                    type="button"
-                    disabled={
-                      actionPending || mustCoup || !canStealFrom(target)
-                    }
-                    onClick={() =>
-                      void wrap(() =>
-                        takeSteal(gameCode, playerId, target.playerId),
-                      )
-                    }
-                  >
-                    Steal — Captain
-                  </button>
-                  <button
-                    type="button"
-                    disabled={actionPending || mustCoup || !canAssassinate}
-                    onClick={() =>
-                      void wrap(() =>
-                        takeAssassinate(gameCode, playerId, target.playerId),
-                      )
-                    }
-                  >
-                    Assassinate — Assassin (3 coins)
-                  </button>
-                  <button
-                    type="button"
-                    disabled={actionPending || !canCoup}
-                    onClick={() =>
-                      void wrap(() =>
-                        performCoup(gameCode, playerId, target.playerId),
-                      )
-                    }
-                  >
-                    Coup (7 coins)
-                  </button>
-                </div>
-              ))}
+              <SmallLabel>Eliminated</SmallLabel>
+              <DisplayHeading size={26}>You&apos;re out.</DisplayHeading>
             </>
+          ) : isMyTurn ? (
+            <ActionTray
+              mustCoup={mustCoup}
+              actionPending={actionPending}
+              canCoup={canCoup}
+              canAssassinate={canAssassinate}
+              canStealFrom={canStealFrom}
+              gameCode={gameCode}
+              playerId={playerId}
+              opponents={aliveOpponents}
+              wrap={wrap}
+            />
           ) : (
-            <p style={{ color: "#666" }}>
-              Waiting for {currentTurnPlayer?.name ?? "other player"}…
-            </p>
+            <>
+              <SmallLabel>{currentTurnPlayer?.name ?? "Opponent"}&apos;s turn</SmallLabel>
+              <DisplayHeading size={26}>
+                Waiting.
+              </DisplayHeading>
+            </>
           )}
         </section>
-      )}
 
-      {/* Game over */}
-      {status === "finished" && (
-        <section style={{ marginTop: 24 }}>
-          <h2 style={{ margin: "0 0 12px" }}>
-            {winner
-              ? winner.playerId === playerId
-                ? "You win!"
-                : `${winner.name} wins!`
-              : "Game over"}
-          </h2>
-          <div style={{ display: "flex", gap: 12 }}>
-            <button type="button" onClick={() => router.push("/")}>
-              Quit
-            </button>
-            <button
-              type="button"
-              disabled={nextGamePending}
-              onClick={() => void handlePlayAgain()}
-            >
-              {nextGamePending ? "Starting…" : "Play Again"}
-            </button>
+        {/* My hand */}
+        <section
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-end",
+            gap: 60,
+          }}
+        >
+          <div style={{ display: "flex", gap: 14 }}>
+            {(me?.influences ?? []).map((inf) => (
+              <Card
+                key={inf.id}
+                role={inf.role}
+                size="md"
+                dead={inf.isRevealed}
+              />
+            ))}
+            {iAmEliminated && me && me.influences.length === 0 && (
+              <Card back size="md" dead />
+            )}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+              paddingBottom: 14,
+            }}
+          >
+            <SmallLabel>{playerName || "—"}</SmallLabel>
+            <CoinPill n={me?.coins ?? 0} />
           </div>
         </section>
+
+        {/* Log */}
+        {mergedLog.length > 0 && (
+          <section
+            style={{
+              background: M.surface,
+              border: `1px solid ${M.border}`,
+              borderRadius: 18,
+              padding: "16px 20px",
+              maxHeight: 220,
+              overflowY: "auto",
+            }}
+          >
+            <SmallLabel style={{ marginBottom: 10 }}>Log</SmallLabel>
+            <ol
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                fontSize: 13,
+                color: M.mutedHi,
+                letterSpacing: "0.005em",
+              }}
+            >
+              {mergedLog.map((entry, i) => (
+                <li
+                  key={entry.key}
+                  style={{
+                    color: i === mergedLog.length - 1 ? M.text : M.mutedHi,
+                  }}
+                >
+                  {entry.message}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+      </main>
+    </Frame>
+  );
+}
+
+// ─── Action tray (current player's turn, action phase) ──────────────────────
+
+function ActionTray({
+  mustCoup,
+  actionPending,
+  canCoup,
+  canAssassinate,
+  canStealFrom,
+  gameCode,
+  playerId,
+  opponents,
+  wrap,
+}: {
+  mustCoup: boolean;
+  actionPending: boolean;
+  canCoup: boolean;
+  canAssassinate: boolean;
+  canStealFrom: (p: { coins: number }) => boolean;
+  gameCode: string;
+  playerId: string;
+  opponents: GamePlayer[];
+  wrap: (fn: () => Promise<void>) => Promise<void>;
+}) {
+  return (
+    <>
+      <SmallLabel color={M.gold}>Your turn</SmallLabel>
+      <DisplayHeading size={26}>
+        {mustCoup ? "Coup required." : "Choose an action."}
+      </DisplayHeading>
+      {mustCoup && (
+        <p style={{ color: M.blood, fontSize: 12, margin: 0 }}>
+          10 or more coins force a Coup.
+        </p>
       )}
 
-      {/* Log */}
-      {mergedLog.length > 0 && (
-        <section style={{ marginTop: 24 }}>
-          <h2 style={{ margin: "0 0 8px" }}>Log</h2>
-          <ol style={{ paddingLeft: 20, margin: 0 }}>
-            {mergedLog.map((entry) => (
-              <li key={entry.key} style={{ marginBottom: 4 }}>
-                {entry.message}
-              </li>
-            ))}
-          </ol>
-        </section>
+      {/* General (non-targeted) actions */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          justifyContent: "center",
+          marginTop: 4,
+        }}
+      >
+        <ActionPill
+          label="Income"
+          gain="+1"
+          disabled={actionPending || mustCoup}
+          onClick={() => void wrap(() => takeIncome(gameCode, playerId))}
+        />
+        <ActionPill
+          label="Foreign Aid"
+          gain="+2"
+          disabled={actionPending || mustCoup}
+          onClick={() => void wrap(() => takeForeignAid(gameCode, playerId))}
+        />
+        <ActionPill
+          label="Tax · Duke"
+          gain="+3"
+          disabled={actionPending || mustCoup}
+          onClick={() => void wrap(() => takeTax(gameCode, playerId))}
+        />
+        <ActionPill
+          label="Exchange · Ambassador"
+          disabled={actionPending || mustCoup}
+          onClick={() => void wrap(() => takeExchange(gameCode, playerId))}
+        />
+      </div>
+
+      {/* Per-opponent targeted actions */}
+      {opponents.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            marginTop: 8,
+            width: "100%",
+            maxWidth: 600,
+          }}
+        >
+          {opponents.map((target) => (
+            <div
+              key={target.playerId}
+              style={{
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: FONT_DISPLAY,
+                  fontSize: 11,
+                  letterSpacing: "0.22em",
+                  color: M.muted,
+                  textTransform: "uppercase",
+                  minWidth: 60,
+                  textAlign: "right",
+                }}
+              >
+                vs {target.name}
+              </span>
+              <ActionPill
+                label="Steal · Captain"
+                gain="+2"
+                disabled={
+                  actionPending || mustCoup || !canStealFrom(target)
+                }
+                onClick={() =>
+                  void wrap(() =>
+                    takeSteal(gameCode, playerId, target.playerId),
+                  )
+                }
+              />
+              <ActionPill
+                label="Assassinate · Assassin"
+                cost={3}
+                disabled={actionPending || mustCoup || !canAssassinate}
+                onClick={() =>
+                  void wrap(() =>
+                    takeAssassinate(gameCode, playerId, target.playerId),
+                  )
+                }
+                danger
+              />
+              <ActionPill
+                label="Coup"
+                cost={7}
+                disabled={actionPending || !canCoup}
+                onClick={() =>
+                  void wrap(() =>
+                    performCoup(gameCode, playerId, target.playerId),
+                  )
+                }
+                danger
+              />
+            </div>
+          ))}
+        </div>
       )}
-    </main>
+    </>
   );
+}
+
+function ActionPill({
+  label,
+  cost,
+  gain,
+  disabled,
+  onClick,
+  danger,
+}: {
+  label: string;
+  cost?: number;
+  gain?: string;
+  disabled?: boolean;
+  onClick?: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Pill danger={danger} disabled={disabled} onClick={onClick}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <span>{label}</span>
+        {cost != null && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 11,
+              opacity: 0.7,
+            }}
+          >
+            <Coin size={9} /> {cost}
+          </span>
+        )}
+        {gain && (
+          <span style={{ fontSize: 11, color: M.muted }}>{gain}</span>
+        )}
+      </span>
+    </Pill>
+  );
+}
+
+// ─── Opponent block ─────────────────────────────────────────────────────────
+
+function OpponentBlock({
+  player: p,
+  online,
+  active,
+  isPendingTarget,
+  isBlocker,
+}: {
+  player: GamePlayer;
+  online: boolean;
+  active: boolean;
+  isPendingTarget: boolean;
+  isBlocker: boolean;
+}) {
+  const eliminated = p.influences.every((i) => i.isRevealed);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 12,
+        position: "relative",
+        opacity: eliminated ? 0.4 : online ? 1 : 0.6,
+        transition: "opacity 0.2s",
+      }}
+    >
+      {active && !eliminated && (
+        <div
+          style={{
+            position: "absolute",
+            top: -18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            fontSize: 9.5,
+            letterSpacing: "0.32em",
+            color: M.gold,
+            textTransform: "uppercase",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Turn
+        </div>
+      )}
+      {isBlocker && !eliminated && (
+        <div
+          style={{
+            position: "absolute",
+            top: -18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            fontSize: 9.5,
+            letterSpacing: "0.32em",
+            color: M.gold,
+            textTransform: "uppercase",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Blocking
+        </div>
+      )}
+      {isPendingTarget && !eliminated && !active && !isBlocker && (
+        <div
+          style={{
+            position: "absolute",
+            top: -18,
+            left: "50%",
+            transform: "translateX(-50%)",
+            fontSize: 9.5,
+            letterSpacing: "0.32em",
+            color: M.blood,
+            textTransform: "uppercase",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          Target
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Avatar name={p.name} dim={!online || eliminated} />
+        <div>
+          <div
+            style={{
+              fontFamily: FONT_DISPLAY,
+              fontSize: 13,
+              letterSpacing: "0.18em",
+              color: active ? M.gold : eliminated ? M.muted : M.text,
+              textTransform: "uppercase",
+            }}
+          >
+            {p.name}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginTop: 2,
+              color: eliminated ? M.muted : M.mutedHi,
+              fontSize: 12,
+            }}
+          >
+            {eliminated ? (
+              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 10 }}>
+                Out
+              </span>
+            ) : !online ? (
+              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 10 }}>
+                Offline
+              </span>
+            ) : (
+              <>
+                <Coin size={9} /> {p.coins}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6 }}>
+        {p.influences.map((inf) =>
+          inf.isRevealed ? (
+            <Card key={inf.id} role={inf.role} size="sm" dead />
+          ) : (
+            <Card key={inf.id} back size="sm" />
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Game over panel ────────────────────────────────────────────────────────
+
+function GameOverPanel({
+  winner,
+  isMe,
+  onQuit,
+  onPlayAgain,
+  nextGamePending,
+}: {
+  winner?: GamePlayer;
+  isMe: boolean;
+  onQuit: () => void;
+  onPlayAgain: () => void;
+  nextGamePending: boolean;
+}) {
+  return (
+    <>
+      <SmallLabel color={M.gold}>Winner</SmallLabel>
+      <DisplayHeading size={48} style={{ fontWeight: 500, letterSpacing: "0.06em" }}>
+        {isMe ? "You win." : (winner?.name?.toUpperCase() ?? "—")}
+      </DisplayHeading>
+      {winner && (
+        <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
+          {winner.influences.map((inf) => (
+            <Card
+              key={inf.id}
+              role={inf.role}
+              size="md"
+              dead={inf.isRevealed}
+              selected={!inf.isRevealed}
+            />
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        <Pill onClick={onQuit}>Quit</Pill>
+        <Pill accent="gold" filled disabled={nextGamePending} onClick={onPlayAgain}>
+          {nextGamePending ? "Starting…" : "Play again"}
+        </Pill>
+      </div>
+    </>
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function shortStatus(s: ConnectionStatus): string {
+  switch (s) {
+    case "SUBSCRIBED":
+      return "ok";
+    case "CONNECTING":
+      return "…";
+    case "CHANNEL_ERROR":
+      return "err";
+    case "TIMED_OUT":
+      return "out";
+    case "CLOSED":
+      return "off";
+  }
+}
+
+function connectionColor(s: ConnectionStatus): string {
+  return s === "SUBSCRIBED"
+    ? M.good
+    : s === "CONNECTING"
+      ? M.muted
+      : M.blood;
 }

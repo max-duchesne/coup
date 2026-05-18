@@ -13,6 +13,14 @@ import {
   upsertLobbyPlayer,
   type LobbyPlayer,
 } from "@/lib/lobby-players";
+import { FONT_DISPLAY, M } from "@/lib/design";
+import {
+  Avatar,
+  DisplayHeading,
+  Frame,
+  Pill,
+  Wordmark,
+} from "@/components/ui";
 
 type ConnectionStatus =
   | "CONNECTING"
@@ -159,7 +167,7 @@ export default function LobbyView() {
     setStartPending(true);
     try {
       await startGame(gameCode, players.map((p) => p.id));
-      // The parent page router detects the games INSERT and switches to game view.
+      // Parent page router detects games INSERT and switches to game view.
     } catch (err) {
       setLoadError(
         err instanceof Error ? err.message : "Failed to start game",
@@ -175,85 +183,257 @@ export default function LobbyView() {
 
   if (!playerId) {
     return (
-      <main style={{ padding: 24, fontFamily: "sans-serif" }}>Loading…</main>
+      <Frame>
+        <main style={{ padding: 32, color: M.muted }}>Loading…</main>
+      </Frame>
     );
   }
 
+  const subheading = (() => {
+    if (players.length === 0) return "Connecting…";
+    if (allReady && isHost) return "Everyone is ready.";
+    if (allReady) return "Waiting for the host.";
+    if (players.length === 1) return "Share the game code to invite others.";
+    return `${players.length} players in the lobby.`;
+  })();
+
   return (
-    <main style={{ padding: 24, fontFamily: "sans-serif" }}>
+    <Frame>
+      {/* Header */}
       <header
-        style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}
+        style={{
+          padding: "28px 48px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: `1px solid ${M.border}`,
+        }}
       >
-        <h1 style={{ margin: 0 }}>{gameCode} Lobby</h1>
-        <span style={{ color: "#666", fontSize: 13 }}>
-          db: <code>{dbStatus}</code> · presence: <code>{presenceStatus}</code>
-        </span>
-        <button type="button" onClick={() => void leaveLobby()}>
-          Leave
-        </button>
+        <Wordmark size={18} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            fontSize: 12,
+            color: M.muted,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+          }}
+        >
+          <span style={{ fontSize: 11 }}>
+            db <code style={{ color: connectionColor(dbStatus) }}>{shortStatus(dbStatus)}</code>
+            {" · "}
+            presence <code style={{ color: connectionColor(presenceStatus) }}>{shortStatus(presenceStatus)}</code>
+          </span>
+          <Pill size="sm" onClick={() => void leaveLobby()}>
+            Leave
+          </Pill>
+        </div>
       </header>
 
-      {loadError && (
-        <p style={{ color: "crimson", marginTop: 12 }}>{loadError}</p>
-      )}
-
-      <p style={{ marginTop: 16 }}>
-        You are <strong>{playerName}</strong>
-        {isHost ? " (host)" : ""}
-      </p>
-
-      <section style={{ marginTop: 16 }}>
-        <button
-          type="button"
-          disabled={!self || readyPending}
-          onClick={() => void toggleReady()}
-        >
-          {self?.is_ready ? "Unready" : "Ready"}
-        </button>
-      </section>
-
-      <section style={{ marginTop: 16 }}>
-        <h2 style={{ margin: "0 0 8px" }}>Players ({players.length})</h2>
-        {players.length === 0 ? (
-          <p>(loading players…)</p>
-        ) : (
-          <ul>
-            {players.map((p) => {
-              const isOnline = onlineIds.has(p.id);
-              return (
-                <li key={p.id} style={{ color: isOnline ? "inherit" : "#999" }}>
-                  {p.name}
-                  {p.id === playerId ? " (you)" : ""}
-                  {p.id === hostId ? " — host" : ""}
-                  {" — "}
-                  {isOnline ? (p.is_ready ? "Ready" : "Not ready") : "Offline"}
-                  <small style={{ marginLeft: 8 }}>
-                    joined {new Date(p.joined_at).toLocaleTimeString()}
-                  </small>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {allReady && isHost && (
-        <section style={{ marginTop: 24 }}>
-          <button
-            type="button"
-            disabled={startPending}
-            onClick={() => void handleStartGame()}
+      <main
+        style={{
+          padding: "48px 24px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ width: "100%", maxWidth: 560, textAlign: "center" }}>
+          <DisplayHeading size={48} style={{ fontWeight: 500, letterSpacing: "0.06em" }}>
+            {gameCode}
+          </DisplayHeading>
+          <p
+            style={{
+              color: M.muted,
+              fontSize: 14,
+              marginTop: 12,
+              lineHeight: 1.6,
+            }}
           >
-            {startPending ? "Starting…" : "Start Game"}
-          </button>
-        </section>
-      )}
+            {subheading}
+          </p>
 
-      {allReady && !isHost && (
-        <p style={{ marginTop: 24, color: "#666" }}>
-          Waiting for host to start the game…
-        </p>
-      )}
-    </main>
+          {loadError && (
+            <p
+              style={{
+                color: M.blood,
+                fontSize: 13,
+                marginTop: 18,
+                letterSpacing: "0.02em",
+              }}
+            >
+              {loadError}
+            </p>
+          )}
+
+          {/* Seat list */}
+          <div
+            style={{
+              marginTop: 36,
+              background: M.surface,
+              border: `1px solid ${M.border}`,
+              borderRadius: 18,
+              padding: 8,
+              textAlign: "left",
+            }}
+          >
+            {players.length === 0 ? (
+              <div style={{ padding: "20px 16px", color: M.muted, fontSize: 13 }}>
+                Loading players…
+              </div>
+            ) : (
+              players.map((p, i) => {
+                const online = onlineIds.has(p.id);
+                const isPlayerHost = p.id === hostId;
+                const status = !online
+                  ? { text: "Offline", color: M.muted }
+                  : p.is_ready
+                    ? { text: "● Ready", color: M.good }
+                    : { text: "○ Not ready", color: M.gold };
+
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      padding: "12px 16px",
+                      borderRadius: 12,
+                      borderBottom:
+                        i < players.length - 1 ? `1px solid ${M.border}` : "none",
+                    }}
+                  >
+                    <div style={{ width: 18, fontSize: 11, color: M.muted }}>
+                      {String(i + 1).padStart(2, "0")}
+                    </div>
+                    <Avatar name={p.name} size={30} dim={!online} />
+                    <div
+                      style={{
+                        flex: 1,
+                        fontFamily: FONT_DISPLAY,
+                        fontSize: 13,
+                        letterSpacing: "0.12em",
+                        color: online ? M.text : M.muted,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {p.name}
+                      {p.id === playerId && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            fontFamily: "inherit",
+                            fontSize: 9,
+                            letterSpacing: "0.25em",
+                            color: M.muted,
+                          }}
+                        >
+                          YOU
+                        </span>
+                      )}
+                      {isPlayerHost && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            fontFamily: "inherit",
+                            fontSize: 9,
+                            letterSpacing: "0.25em",
+                            color: M.gold,
+                          }}
+                        >
+                          HOST
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: status.color,
+                        letterSpacing: "0.18em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {status.text}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Actions */}
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              justifyContent: "center",
+              marginTop: 28,
+              flexWrap: "wrap",
+            }}
+          >
+            <Pill
+              disabled={!self || readyPending}
+              onClick={() => void toggleReady()}
+              accent={self?.is_ready ? "gold" : "neutral"}
+            >
+              {self?.is_ready ? "Unready" : "Ready"}
+            </Pill>
+
+            {isHost && (
+              <Pill
+                accent="gold"
+                filled
+                disabled={!allReady || startPending}
+                onClick={() => void handleStartGame()}
+              >
+                {startPending ? "Starting…" : "Start game"}
+              </Pill>
+            )}
+
+            {!isHost && allReady && (
+              <span
+                style={{
+                  alignSelf: "center",
+                  fontSize: 12,
+                  color: M.muted,
+                  letterSpacing: "0.05em",
+                }}
+              >
+                Waiting for host.
+              </span>
+            )}
+          </div>
+        </div>
+      </main>
+
+    </Frame>
   );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function shortStatus(s: ConnectionStatus): string {
+  switch (s) {
+    case "SUBSCRIBED":
+      return "ok";
+    case "CONNECTING":
+      return "…";
+    case "CHANNEL_ERROR":
+      return "err";
+    case "TIMED_OUT":
+      return "out";
+    case "CLOSED":
+      return "off";
+  }
+}
+
+function connectionColor(s: ConnectionStatus): string {
+  return s === "SUBSCRIBED"
+    ? M.good
+    : s === "CONNECTING"
+      ? M.muted
+      : M.blood;
 }

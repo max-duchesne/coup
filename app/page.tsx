@@ -3,6 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePlayer, setPlayerName } from "@/lib/player";
+import { M } from "@/lib/design";
+import {
+  FieldInput,
+  Frame,
+  Pill,
+  SmallLabel,
+  Wordmark,
+} from "@/components/ui";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -27,49 +35,103 @@ export default function Home() {
   const canJoin = canCreate && trimmedCode.length > 0;
 
   return (
-    <main style={{ padding: 24, fontFamily: "sans-serif" }}>
-      <h1>Coup</h1>
-
-      <section style={{ marginTop: 16 }}>
-        <label>
-          Display name:{" "}
-          <input
-            type="text"
-            value={player.name}
-            onChange={(e) => setPlayerName(e.target.value)}
-            placeholder="Enter your name"
-            maxLength={24}
-          />
-        </label>
-      </section>
-
-      <section style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          disabled={!canCreate}
-          onClick={() => router.push(`/${generateGameCode()}`)}
+    <Frame>
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            padding: "32px 48px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
         >
-          Create Game
-        </button>
+          <Wordmark size={20} />
+        </header>
 
-        <span>or</span>
-
-        <input
-          type="text"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="GAME CODE"
-          maxLength={8}
-          style={{ textTransform: "uppercase" }}
-        />
-        <button
-          type="button"
-          disabled={!canJoin}
-          onClick={() => router.push(`/${trimmedCode}`)}
+        <main
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+          }}
         >
-          Join Game
-        </button>
-      </section>
-    </main>
+          <div style={{ width: "100%", maxWidth: 460 }}>
+            <p
+              style={{
+                color: M.text,
+                fontSize: 18,
+                lineHeight: 1.5,
+                textAlign: "center",
+                margin: 0,
+              }}
+            >
+              An online alternative to the card game Coup.
+            </p>
+
+            <section
+              style={{
+                marginTop: 36,
+                display: "flex",
+                flexDirection: "column",
+                gap: 18,
+                textAlign: "left",
+              }}
+            >
+              <div>
+                <SmallLabel style={{ marginBottom: 10 }}>Your name</SmallLabel>
+                <FieldInput
+                  value={player.name}
+                  onChange={setPlayerName}
+                  placeholder="Enter your name"
+                  maxLength={24}
+                  style={{ width: "100%" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}>
+                <Pill
+                  accent="gold"
+                  filled
+                  disabled={!canCreate}
+                  onClick={() => router.push(`/${generateGameCode()}`)}
+                >
+                  Create game
+                </Pill>
+              </div>
+
+              <div
+                style={{
+                  marginTop: 24,
+                  paddingTop: 24,
+                  borderTop: `1px solid ${M.border}`,
+                }}
+              >
+                <SmallLabel style={{ marginBottom: 10 }}>
+                  Join an existing game
+                </SmallLabel>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <FieldInput
+                    value={code}
+                    onChange={setCode}
+                    placeholder="GAME CODE"
+                    maxLength={8}
+                    uppercase
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <Pill
+                    disabled={!canJoin}
+                    onClick={() => router.push(`/${trimmedCode}`)}
+                  >
+                    Join
+                  </Pill>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </Frame>
   );
 }
