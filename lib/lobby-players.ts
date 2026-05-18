@@ -73,23 +73,3 @@ export async function removeLobbyPlayer(playerId: string): Promise<void> {
   const { error } = await supabase.from("players").delete().eq("id", playerId);
   if (error) throw error;
 }
-
-/**
- * Deletes any seat in the game that shares the same name but has a different
- * player ID. Called on join so that a returning player with a new UUID (e.g.
- * after their localStorage was cleared) doesn't leave a ghost "Offline" seat.
- */
-export async function removeStaleSeats(
-  gameCode: string,
-  name: string,
-  currentId: string,
-): Promise<void> {
-  const { error } = await supabase
-    .from("players")
-    .delete()
-    .eq("game_code", gameCode)
-    .eq("name", name)
-    .neq("id", currentId);
-
-  if (error) throw error;
-}

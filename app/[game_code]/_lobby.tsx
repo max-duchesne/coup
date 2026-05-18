@@ -1,13 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+
+function errMsg(err: unknown, fallback: string): string {
+  if (!err) return fallback;
+  if (err instanceof Error) return err.message;
+  if (typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string") {
+    return (err as { message: string }).message;
+  }
+  return fallback;
+}
+import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { usePlayer } from "@/lib/player";
 import { startGame } from "@/lib/game";
 import {
   fetchLobbyPlayers,
-  removeStaleSeats,
   setLobbyPlayerReady,
   upsertLobbyPlayer,
   type LobbyPlayer,
@@ -25,12 +33,12 @@ import Chat from "@/components/Chat";
 
 export default function LobbyView() {
   const params = useParams<{ game_code: string }>();
-  const router = useRouter();
   const gameCode = (params?.game_code ?? "").toUpperCase();
 
   const player = usePlayer();
   const playerId = player.id;
   const playerName = player.name;
+  const playerLoading = player.loading;
 
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [onlineIds, setOnlineIds] = useState<ReadonlySet<string>>(new Set());
@@ -49,18 +57,12 @@ export default function LobbyView() {
   // DB channel — seat list and ready state only.
   // Game-start navigation is handled by the parent page router.
   useEffect(() => {
-    if (!playerId) return;
-    if (!playerName) {
-      router.replace("/");
-      return;
-    }
-    if (!gameCode) return;
+    if (!playerId || !gameCode) return;
 
     cancelledRef.current = false;
 
     void (async () => {
       try {
-        await removeStaleSeats(gameCode, playerName, playerId);
         await upsertLobbyPlayer({
           id: playerId,
           game_code: gameCode,
@@ -70,7 +72,7 @@ export default function LobbyView() {
       } catch (err) {
         if (!cancelledRef.current) {
           setLoadError(
-            err instanceof Error ? err.message : "Failed to join lobby",
+            errMsg(err, "Failed to join lobby"),
           );
         }
       }
@@ -96,7 +98,7 @@ export default function LobbyView() {
       cancelledRef.current = true;
       supabase.removeChannel(dbChannel);
     };
-  }, [gameCode, playerId, playerName, refreshPlayers, router]);
+  }, [gameCode, playerId, playerName, refreshPlayers]);
 
   // Presence channel — online/offline tracking only
   useEffect(() => {
@@ -143,7 +145,7 @@ export default function LobbyView() {
       await setLobbyPlayerReady(playerId, !self.is_ready);
     } catch (err) {
       setLoadError(
-        err instanceof Error ? err.message : "Failed to update ready status",
+        errMsg(err, "Failed to update ready status"),
       );
     } finally {
       setReadyPending(false);
@@ -158,14 +160,14 @@ export default function LobbyView() {
       // Parent page router detects games INSERT and switches to game view.
     } catch (err) {
       setLoadError(
-        err instanceof Error ? err.message : "Failed to start game",
+        errMsg(err, "Failed to start game"),
       );
       setStartPending(false);
     }
   };
 
 
-  if (!playerId) {
+  if (playerLoading || !playerId) {
     return (
       <Frame>
         <main style={{ padding: 32, color: M.muted }}>Loading…</main>

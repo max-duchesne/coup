@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { usePlayer, setPlayerName } from "@/lib/player";
+import { usePlayer } from "@/lib/player";
 import { M } from "@/lib/design";
 import {
   FieldInput,
@@ -30,10 +30,12 @@ export default function Home() {
   const player = usePlayer();
   const [code, setCode] = useState("");
 
-  const trimmedName = player.name.trim();
   const trimmedCode = code.trim().toUpperCase();
-  const canCreate = trimmedName.length > 0;
-  const canJoin = canCreate && trimmedCode.length > 0;
+  // The proxy guarantees a session here, so we can create/join as soon as
+  // the player record finishes loading.
+  const ready = !player.loading && player.id !== "";
+  const canCreate = ready;
+  const canJoin = ready && trimmedCode.length > 0;
 
   return (
     <Frame>
@@ -81,18 +83,7 @@ export default function Home() {
                 textAlign: "left",
               }}
             >
-              <div>
-                <SmallLabel style={{ marginBottom: 10 }}>Your name</SmallLabel>
-                <FieldInput
-                  value={player.name}
-                  onChange={setPlayerName}
-                  placeholder="Enter your name"
-                  maxLength={24}
-                  style={{ width: "100%" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}>
+              <div style={{ display: "flex", justifyContent: "center" }}>
                 <Pill
                   accent="gold"
                   filled
@@ -105,7 +96,7 @@ export default function Home() {
 
               <div
                 style={{
-                  marginTop: 24,
+                  marginTop: 16,
                   paddingTop: 24,
                   borderTop: `1px solid ${M.border}`,
                 }}

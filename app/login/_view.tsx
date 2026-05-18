@@ -97,6 +97,7 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
           <button
             key={t.id}
             onClick={() => onChange(t.id)}
+            className="coup-btn"
             style={{
               padding: "9px 18px",
               borderRadius: 999,
@@ -106,7 +107,6 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
               background: active ? M.surface2 : "transparent",
               color: active ? M.text : M.muted,
               border: `1px solid ${active ? M.borderHi : M.border}`,
-              cursor: "pointer",
             }}
           >
             {t.label}
@@ -171,8 +171,8 @@ function GuestPanel() {
         {busy ? "Starting…" : "Play as guest"}
       </Pill>
       <p style={{ color: M.muted, fontSize: 13, margin: 0, lineHeight: 1.5 }}>
-        Guest accounts are tied to this browser. Sign in with Google or email
-        later to keep your identity across devices.
+        Guest accounts are tied to this browser. Sign out and sign in with
+        Google or email to keep your identity across devices.
       </p>
     </div>
   );
@@ -199,7 +199,6 @@ function GooglePanel() {
         setError(oauthError.message);
         setBusy(false);
       }
-      // On success the browser navigates to Google; nothing else to do here.
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
       setBusy(false);
@@ -209,7 +208,8 @@ function GooglePanel() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <p style={{ color: M.muted, fontSize: 15, margin: 0, lineHeight: 1.5 }}>
-        Sign in with your Google account.
+        Sign in with your Google account. Your name and avatar will be used in
+        the lobby.
       </p>
       {error && <ErrorText>{error}</ErrorText>}
       <GoogleButton busy={busy} onClick={signIn} />
@@ -218,25 +218,16 @@ function GooglePanel() {
 }
 
 /**
- * Sign-in button that follows Google's branding guidelines (dark theme):
+ * Sign-in button following Google's branding guidelines (dark theme):
  * https://developers.google.com/identity/branding-guidelines
- *
- * - Dark background #131314, border #8E918F
- * - Standard-colour Google G logo on a white circle
- * - Roboto Medium / #E3E3E3 text
  */
-function GoogleButton({
-  busy,
-  onClick,
-}: {
-  busy: boolean;
-  onClick: () => void;
-}) {
+function GoogleButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       disabled={busy}
       onClick={onClick}
+      className="coup-btn"
       style={{
         display: "flex",
         alignItems: "center",
@@ -252,11 +243,9 @@ function GoogleButton({
         fontFamily: "'Roboto', 'Helvetica Neue', sans-serif",
         fontWeight: 500,
         letterSpacing: "0.02em",
-        cursor: busy ? "default" : "pointer",
         opacity: busy ? 0.6 : 1,
       }}
     >
-      {/* Google G on white circle — Google branding requires white background */}
       <span
         style={{
           display: "flex",
@@ -276,7 +265,7 @@ function GoogleButton({
   );
 }
 
-/** The standard-colour Google G SVG logo. Do not alter the fill colours. */
+/** Standard-colour Google G SVG. Do not alter the fill colours. */
 function GoogleGLogo({ size = 18 }: { size?: number }) {
   return (
     <svg
@@ -346,11 +335,7 @@ function EmailPanel({ onSwitchToGoogle }: { onSwitchToGoogle: () => void }) {
   );
 }
 
-function EmailSignInForm({
-  onSwitchToGoogle,
-}: {
-  onSwitchToGoogle: () => void;
-}) {
+function EmailSignInForm({ onSwitchToGoogle }: { onSwitchToGoogle: () => void }) {
   const [state, action, pending] = useActionState<AuthFormState, FormData>(
     signInWithPassword,
     null,
@@ -358,18 +343,11 @@ function EmailSignInForm({
   return (
     <form action={action} style={fieldsStyle}>
       <Field label="Email" name="email" type="email" autoComplete="email" />
-      <Field
-        label="Password"
-        name="password"
-        type="password"
-        autoComplete="current-password"
-      />
+      <Field label="Password" name="password" type="password" autoComplete="current-password" />
       {state?.error && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <ErrorText>{state.error}</ErrorText>
-          {state.suggestGoogle && (
-            <GoogleSuggestion onSwitch={onSwitchToGoogle} />
-          )}
+          {state.suggestGoogle && <GoogleSuggestion onSwitch={onSwitchToGoogle} />}
         </div>
       )}
       <Pill type="submit" accent="gold" filled disabled={pending}>
@@ -379,11 +357,7 @@ function EmailSignInForm({
   );
 }
 
-function EmailSignUpForm({
-  onSwitchToGoogle,
-}: {
-  onSwitchToGoogle: () => void;
-}) {
+function EmailSignUpForm({ onSwitchToGoogle }: { onSwitchToGoogle: () => void }) {
   const [state, action, pending] = useActionState<AuthFormState, FormData>(
     signUpWithPassword,
     null,
@@ -391,35 +365,15 @@ function EmailSignUpForm({
   const isSuccess = state?.error?.toLowerCase().includes("check your email");
   return (
     <form action={action} style={fieldsStyle}>
-      <Field
-        label="Display name"
-        name="displayName"
-        type="text"
-        maxLength={24}
-        autoComplete="nickname"
-      />
+      <Field label="Display name" name="displayName" type="text" maxLength={24} autoComplete="nickname" />
       <Field label="Email" name="email" type="email" autoComplete="email" />
-      <Field
-        label="Password"
-        name="password"
-        type="password"
-        autoComplete="new-password"
-        helper="At least 8 characters."
-      />
+      <Field label="Password" name="password" type="password" autoComplete="new-password" helper="At least 8 characters." />
       {state?.error && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <p
-            style={{
-              color: isSuccess ? M.good : M.blood,
-              fontSize: 14,
-              margin: 0,
-            }}
-          >
+          <p style={{ color: isSuccess ? M.good : M.blood, fontSize: 14, margin: 0 }}>
             {state.error}
           </p>
-          {state.suggestGoogle && (
-            <GoogleSuggestion onSwitch={onSwitchToGoogle} />
-          )}
+          {state.suggestGoogle && <GoogleSuggestion onSwitch={onSwitchToGoogle} />}
         </div>
       )}
       <Pill type="submit" accent="gold" filled disabled={pending}>
@@ -429,7 +383,6 @@ function EmailSignUpForm({
   );
 }
 
-/** Inline nudge that appears below an error when a Google account is suspected. */
 function GoogleSuggestion({ onSwitch }: { onSwitch: () => void }) {
   return (
     <p style={{ color: M.muted, fontSize: 13, margin: 0 }}>
@@ -498,15 +451,11 @@ function Field({
           outline: "none",
         }}
       />
-      {helper && (
-        <span style={{ color: M.muted, fontSize: 12 }}>{helper}</span>
-      )}
+      {helper && <span style={{ color: M.muted, fontSize: 12 }}>{helper}</span>}
     </label>
   );
 }
 
 function ErrorText({ children }: { children: React.ReactNode }) {
-  return (
-    <p style={{ color: M.blood, fontSize: 14, margin: 0 }}>{children}</p>
-  );
+  return <p style={{ color: M.blood, fontSize: 14, margin: 0 }}>{children}</p>;
 }

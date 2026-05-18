@@ -132,6 +132,7 @@ export default function GameView() {
   const player = usePlayer();
   const playerId = player.id;
   const playerName = player.name;
+  const playerLoading = player.loading;
 
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
@@ -325,7 +326,7 @@ export default function GameView() {
 
   // ── Early returns ─────────────────────────────────────────────────────────
 
-  if (!playerId) {
+  if (playerLoading || !playerId) {
     return (
       <Frame>
         <main style={{ padding: 32, color: M.muted, fontSize: 17 }}>Loading…</main>

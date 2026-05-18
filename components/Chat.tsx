@@ -238,6 +238,7 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
         <button
           onClick={() => void handleSend()}
           disabled={!draft.trim() || sending}
+          className="coup-btn"
           style={{
             flexShrink: 0,
             padding: "10px 18px",
@@ -246,9 +247,7 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
             background: "transparent",
             color: draft.trim() ? M.gold : M.muted,
             fontSize: 16,
-            cursor: draft.trim() && !sending ? "pointer" : "default",
             opacity: !draft.trim() || sending ? 0.4 : 1,
-            transition: "all 0.15s",
             whiteSpace: "nowrap",
           }}
         >
