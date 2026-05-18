@@ -61,9 +61,9 @@ export default function GameCodePage() {
             borderBottom: `1px solid ${M.border}`,
           }}
         >
-          <Wordmark size={18} />
+          <Wordmark size={22} />
         </header>
-        <main style={{ padding: 32, color: M.muted, fontSize: 14 }}>
+        <main style={{ padding: 32, color: M.muted, fontSize: 17 }}>
           Connecting…
         </main>
       </Frame>

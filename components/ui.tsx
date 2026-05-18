@@ -6,7 +6,7 @@ import { FONT_DISPLAY, M, ROLE_GLYPH } from "@/lib/design";
 
 // ─── Coin ──────────────────────────────────────────────────────────────────
 
-export function Coin({ size = 14 }: { size?: number }) {
+export function Coin({ size = 17 }: { size?: number }) {
   return (
     <span
       style={{
@@ -36,17 +36,17 @@ export function CoinPill({
         display: "inline-flex",
         alignItems: "center",
         gap: 7,
-        padding: small ? "5px 12px" : "7px 16px",
+        padding: small ? "6px 14px" : "9px 20px",
         borderRadius: 999,
         background: M.surface,
         border: `1px solid ${M.border}`,
-        fontSize: small ? 15 : 18,
+        fontSize: small ? 17 : 21,
         color: M.text,
         letterSpacing: "0.02em",
         fontWeight: 500,
       }}
     >
-      <Coin size={small ? 12 : 15} />
+      <Coin size={small ? 14 : 18} />
       {n}
     </span>
   );
@@ -56,7 +56,7 @@ export function CoinPill({
 
 export function Avatar({
   name,
-  size = 36,
+  size = 44,
   dim = false,
 }: {
   name: string;
@@ -108,17 +108,17 @@ export function Card({
   onClick?: () => void;
 }) {
   const dims = {
-    xs: { w: 50, h: 72, r: 8 },
-    sm: { w: 64, h: 92, r: 12 },
-    md: { w: 110, h: 158, r: 12 },
-    lg: { w: 142, h: 200, r: 14 },
+    xs: { w: 60, h: 86, r: 10 },
+    sm: { w: 78, h: 112, r: 14 },
+    md: { w: 134, h: 192, r: 14 },
+    lg: { w: 172, h: 244, r: 16 },
   }[size];
 
   const showFace = !back && Boolean(role);
   const glyphSize =
-    size === "lg" ? 80 : size === "md" ? 62 : size === "sm" ? 38 : 28;
+    size === "lg" ? 96 : size === "md" ? 74 : size === "sm" ? 46 : 34;
   const nameSize =
-    size === "lg" ? 14 : size === "md" ? 12 : size === "sm" ? 9 : 0;
+    size === "lg" ? 17 : size === "md" ? 15 : size === "sm" ? 11 : 0;
 
   const baseStyle: CSSProperties = {
     width: dims.w,
@@ -133,7 +133,7 @@ export function Card({
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: size === "lg" ? 14 : 8,
+    gap: size === "lg" ? 16 : 10,
     position: "relative",
     opacity: dead ? 0.35 : disabled ? 0.5 : 1,
     cursor: onClick && !disabled && !dead ? "pointer" : "default",
@@ -154,7 +154,7 @@ export function Card({
             alignItems: "center",
             justifyContent: "center",
             fontFamily: FONT_DISPLAY,
-            fontSize: size === "xs" ? 14 : 18,
+            fontSize: size === "xs" ? 17 : 22,
             color: dead ? M.muted : "rgba(201,162,83,0.5)",
             letterSpacing: "0.05em",
           }}
@@ -172,7 +172,7 @@ export function Card({
               alignItems: "center",
               justifyContent: "center",
               fontFamily: FONT_DISPLAY,
-              fontSize: size === "sm" ? 9 : 11,
+              fontSize: size === "sm" ? 11 : 13,
               color: M.muted,
               letterSpacing: "0.18em",
             }}
@@ -221,7 +221,7 @@ export function Card({
             alignItems: "center",
             justifyContent: "center",
             fontFamily: FONT_DISPLAY,
-            fontSize: 11,
+            fontSize: 13,
             letterSpacing: "0.25em",
             color: M.muted,
           }}
@@ -258,8 +258,8 @@ export function Pill({
   type = "button",
   style,
 }: PillProps) {
-  const pad = size === "sm" ? "7px 14px" : "10px 20px";
-  const fs = size === "sm" ? 13 : 15;
+  const pad = size === "sm" ? "9px 16px" : "12px 26px";
+  const fs = size === "sm" ? 15 : 18;
   const accentColor = danger
     ? M.blood
     : accent === "gold"
@@ -302,7 +302,7 @@ export function Pill({
 // ─── Wordmark ──────────────────────────────────────────────────────────────
 
 export function Wordmark({
-  size = 22,
+  size = 26,
   sub,
 }: {
   size?: number;
@@ -324,7 +324,7 @@ export function Wordmark({
       {sub && (
         <div
           style={{
-            fontSize: 10.5,
+            fontSize: 12,
             letterSpacing: "0.3em",
             color: M.muted,
             textTransform: "uppercase",
@@ -375,9 +375,9 @@ export function SmallLabel({
   return (
     <div
       style={{
-        fontSize: 11,
+        fontSize: 13,
         color: color ?? M.muted,
-        letterSpacing: "0.32em",
+        letterSpacing: "0.28em",
         textTransform: "uppercase",
         fontWeight: 600,
         ...style,
@@ -392,7 +392,7 @@ export function SmallLabel({
 
 export function DisplayHeading({
   children,
-  size = 28,
+  size = 34,
   style,
 }: {
   children: ReactNode;
@@ -444,9 +444,9 @@ export function FieldInput({
         background: M.surface,
         border: `1px solid ${M.border}`,
         borderRadius: 999,
-        padding: "10px 18px",
+        padding: "12px 22px",
         color: M.text,
-        fontSize: 13,
+        fontSize: 16,
         fontFamily: "inherit",
         outline: "none",
         textTransform: uppercase ? "uppercase" : "none",

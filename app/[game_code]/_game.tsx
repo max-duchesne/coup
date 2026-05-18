@@ -328,7 +328,7 @@ export default function GameView() {
   if (!playerId) {
     return (
       <Frame>
-        <main style={{ padding: 32, color: M.muted }}>Loading…</main>
+        <main style={{ padding: 32, color: M.muted, fontSize: 17 }}>Loading…</main>
       </Frame>
     );
   }
@@ -337,7 +337,7 @@ export default function GameView() {
     return (
       <Frame>
         <main style={{ padding: 32 }}>
-          <p style={{ color: M.muted }}>Connecting…</p>
+          <p style={{ color: M.muted, fontSize: 17 }}>Connecting…</p>
         </main>
       </Frame>
     );
@@ -436,7 +436,7 @@ export default function GameView() {
           borderBottom: `1px solid ${M.border}`,
         }}
       >
-        <Wordmark size={18} sub={`Room · ${gameCode}`} />
+        <Wordmark size={22} sub={`Room · ${gameCode}`} />
       </header>
 
       <main
@@ -465,7 +465,7 @@ export default function GameView() {
           <section
             style={{
               display: "flex",
-              gap: 48,
+              gap: 56,
               flexWrap: "wrap",
               justifyContent: "center",
             }}
@@ -491,8 +491,8 @@ export default function GameView() {
         {/* Spotlight: contextual content based on phase */}
         <section
           style={{
-            minHeight: 220,
-            padding: "32px 24px",
+            minHeight: 280,
+            padding: "36px 28px",
             background: M.surface,
             border: `1px solid ${M.border}`,
             borderRadius: 18,
@@ -500,7 +500,7 @@ export default function GameView() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: 18,
+            gap: 22,
             textAlign: "center",
           }}
         >
@@ -508,7 +508,7 @@ export default function GameView() {
             <p
               style={{
                 color: M.blood,
-                fontSize: 13,
+                fontSize: 16,
                 letterSpacing: "0.02em",
                 margin: 0,
               }}
@@ -535,7 +535,7 @@ export default function GameView() {
           ) : iMustLoseInfluence ? (
             <>
               <SmallLabel color={M.blood}>Lose an influence</SmallLabel>
-              <DisplayHeading size={28}>
+              <DisplayHeading size={32}>
                 Choose a card to reveal.
               </DisplayHeading>
               <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
@@ -543,7 +543,7 @@ export default function GameView() {
                   <Card
                     key={inf.id}
                     role={inf.role}
-                    size="md"
+                    size="lg"
                     onClick={
                       actionPending
                         ? undefined
@@ -561,7 +561,7 @@ export default function GameView() {
           ) : turnPhase === "lose_influence" ? (
             <>
               <SmallLabel>Lose an influence</SmallLabel>
-              <DisplayHeading size={26}>
+              <DisplayHeading size={30}>
                 {players.find((p) => p.playerId === pendingTargetId)?.name ??
                   "A player"}{" "}
                 is choosing a card.
@@ -570,7 +570,7 @@ export default function GameView() {
           ) : isMyExchange ? (
             <>
               <SmallLabel color={M.gold}>Exchange</SmallLabel>
-              <DisplayHeading size={26}>
+              <DisplayHeading size={30}>
                 Keep {myLiveInfluences.length} card
                 {myLiveInfluences.length !== 1 ? "s" : ""}.
               </DisplayHeading>
@@ -620,7 +620,7 @@ export default function GameView() {
           ) : turnPhase === "ambassador_exchange" ? (
             <>
               <SmallLabel>Exchange</SmallLabel>
-              <DisplayHeading size={26}>
+              <DisplayHeading size={30}>
                 {currentTurnPlayer?.name ?? "A player"} is exchanging.
               </DisplayHeading>
             </>
@@ -631,7 +631,7 @@ export default function GameView() {
               </SmallLabel>
               {/* Banner */}
               {inBlockChallenge && pendingBlockRole ? (
-                <DisplayHeading size={26}>
+                <DisplayHeading size={30}>
                   <span style={{ color: M.gold }}>
                     {blocker?.name ?? "Someone"}
                   </span>{" "}
@@ -646,14 +646,14 @@ export default function GameView() {
                   .
                 </DisplayHeading>
               ) : pendingAction === "foreign_aid" ? (
-                <DisplayHeading size={26}>
+                <DisplayHeading size={30}>
                   <span style={{ color: M.gold }}>
                     {currentTurnPlayer?.name ?? "Someone"}
                   </span>{" "}
                   takes Foreign Aid.
                 </DisplayHeading>
               ) : ACTION_CLAIMED_ROLE[pendingAction] ? (
-                <DisplayHeading size={26}>
+                <DisplayHeading size={30}>
                   <span style={{ color: M.gold }}>
                     {currentTurnPlayer?.name ?? "Someone"}
                   </span>{" "}
@@ -677,7 +677,7 @@ export default function GameView() {
                     gap: 10,
                     flexWrap: "wrap",
                     justifyContent: "center",
-                    marginTop: 6,
+                    marginTop: 10,
                   }}
                 >
                   <Pill
@@ -725,7 +725,7 @@ export default function GameView() {
           ) : iAmEliminated ? (
             <>
               <SmallLabel>Eliminated</SmallLabel>
-              <DisplayHeading size={26}>You&apos;re out.</DisplayHeading>
+              <DisplayHeading size={30}>You&apos;re out.</DisplayHeading>
             </>
           ) : isMyTurn ? (
             <ActionTray
@@ -742,7 +742,7 @@ export default function GameView() {
           ) : (
             <>
               <SmallLabel>{currentTurnPlayer?.name ?? "Opponent"}&apos;s turn</SmallLabel>
-              <DisplayHeading size={26}>
+              <DisplayHeading size={30}>
                 Waiting.
               </DisplayHeading>
             </>
@@ -755,20 +755,20 @@ export default function GameView() {
             display: "flex",
             justifyContent: "center",
             alignItems: "flex-end",
-            gap: 60,
+            gap: 72,
           }}
         >
-          <div style={{ display: "flex", gap: 14 }}>
+          <div style={{ display: "flex", gap: 18 }}>
             {(me?.influences ?? []).map((inf) => (
               <Card
                 key={inf.id}
                 role={inf.role}
-                size="md"
+                size="lg"
                 dead={inf.isRevealed}
               />
             ))}
             {iAmEliminated && me && me.influences.length === 0 && (
-              <Card back size="md" dead />
+              <Card back size="lg" dead />
             )}
           </div>
           <div
@@ -792,12 +792,12 @@ export default function GameView() {
               background: M.surface,
               border: `1px solid ${M.border}`,
               borderRadius: 18,
-              padding: "16px 20px",
-              maxHeight: 220,
+              padding: "18px 22px",
+              maxHeight: 280,
               overflowY: "auto",
             }}
           >
-            <SmallLabel style={{ marginBottom: 10 }}>Log</SmallLabel>
+            <SmallLabel style={{ marginBottom: 12 }}>Log</SmallLabel>
             <ol
               style={{
                 margin: 0,
@@ -805,8 +805,8 @@ export default function GameView() {
                 listStyle: "none",
                 display: "flex",
                 flexDirection: "column",
-                gap: 6,
-                fontSize: 13,
+                gap: 8,
+                fontSize: 16,
                 color: M.mutedHi,
                 letterSpacing: "0.005em",
               }}
@@ -869,11 +869,11 @@ function ActionTray({
   return (
     <>
       <SmallLabel color={M.gold}>Your turn</SmallLabel>
-      <DisplayHeading size={26}>
+      <DisplayHeading size={30}>
         {mustCoup ? "Coup required." : "Choose an action."}
       </DisplayHeading>
       {mustCoup && (
-        <p style={{ color: M.blood, fontSize: 12, margin: 0 }}>
+        <p style={{ color: M.blood, fontSize: 15, margin: 0 }}>
           10 or more coins force a Coup.
         </p>
       )}
@@ -882,10 +882,10 @@ function ActionTray({
       <div
         style={{
           display: "flex",
-          gap: 8,
+          gap: 10,
           flexWrap: "wrap",
           justifyContent: "center",
-          marginTop: 4,
+          marginTop: 8,
         }}
       >
         <ActionPill
@@ -939,7 +939,7 @@ function ActionTray({
               <span
                 style={{
                   fontFamily: FONT_DISPLAY,
-                  fontSize: 11,
+                  fontSize: 13,
                   letterSpacing: "0.22em",
                   color: M.muted,
                   textTransform: "uppercase",
@@ -1014,15 +1014,15 @@ function ActionPill({
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              fontSize: 11,
+              fontSize: 14,
               opacity: 0.7,
             }}
           >
-            <Coin size={9} /> {cost}
+            <Coin size={12} /> {cost}
           </span>
         )}
         {gain && (
-          <span style={{ fontSize: 11, color: M.muted }}>{gain}</span>
+          <span style={{ fontSize: 14, color: M.muted }}>{gain}</span>
         )}
       </span>
     </Pill>
@@ -1065,7 +1065,7 @@ function OpponentBlock({
             top: -18,
             left: "50%",
             transform: "translateX(-50%)",
-            fontSize: 9.5,
+            fontSize: 11,
             letterSpacing: "0.32em",
             color: M.gold,
             textTransform: "uppercase",
@@ -1083,7 +1083,7 @@ function OpponentBlock({
             top: -18,
             left: "50%",
             transform: "translateX(-50%)",
-            fontSize: 9.5,
+            fontSize: 11,
             letterSpacing: "0.32em",
             color: M.gold,
             textTransform: "uppercase",
@@ -1101,7 +1101,7 @@ function OpponentBlock({
             top: -18,
             left: "50%",
             transform: "translateX(-50%)",
-            fontSize: 9.5,
+            fontSize: 11,
             letterSpacing: "0.32em",
             color: M.blood,
             textTransform: "uppercase",
@@ -1119,7 +1119,7 @@ function OpponentBlock({
           <div
             style={{
               fontFamily: FONT_DISPLAY,
-              fontSize: 15,
+              fontSize: 18,
               letterSpacing: "0.18em",
               color: active ? M.gold : eliminated ? M.muted : M.text,
               textTransform: "uppercase",
@@ -1134,27 +1134,27 @@ function OpponentBlock({
               gap: 6,
               marginTop: 2,
               color: eliminated ? M.muted : M.mutedHi,
-              fontSize: 15,
+              fontSize: 18,
             }}
           >
             {eliminated ? (
-              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 11 }}>
+              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 13 }}>
                 Out
               </span>
             ) : !online ? (
-              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 11 }}>
+              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 13 }}>
                 Offline
               </span>
             ) : (
               <>
-                <Coin size={12} /> {p.coins}
+                <Coin size={14} /> {p.coins}
               </>
             )}
           </div>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 8 }}>
         {p.influences.map((inf) =>
           inf.isRevealed ? (
             <Card key={inf.id} role={inf.role} size="sm" dead />
@@ -1185,7 +1185,7 @@ function GameOverPanel({
   return (
     <>
       <SmallLabel color={M.gold}>Winner</SmallLabel>
-      <DisplayHeading size={48} style={{ fontWeight: 500, letterSpacing: "0.06em" }}>
+      <DisplayHeading size={56} style={{ fontWeight: 500, letterSpacing: "0.06em" }}>
         {isMe ? "You win." : (winner?.name?.toUpperCase() ?? "—")}
       </DisplayHeading>
       {winner && (
@@ -1194,7 +1194,7 @@ function GameOverPanel({
             <Card
               key={inf.id}
               role={inf.role}
-              size="md"
+              size="lg"
               dead={inf.isRevealed}
               selected={!inf.isRevealed}
             />
@@ -1227,7 +1227,7 @@ function ConfirmPanel({
   return (
     <>
       <SmallLabel>Confirm</SmallLabel>
-      <DisplayHeading size={28}>{label}</DisplayHeading>
+      <DisplayHeading size={34}>{label}</DisplayHeading>
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
         <Pill onClick={onBack} disabled={pending}>
           Go back

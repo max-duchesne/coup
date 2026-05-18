@@ -115,7 +115,7 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
       {/* Header */}
       <div
         style={{
-          padding: "14px 18px",
+          padding: "16px 20px",
           borderBottom: `1px solid ${M.border}`,
           flexShrink: 0,
         }}
@@ -123,7 +123,7 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
         <span
           style={{
             fontFamily: FONT_DISPLAY,
-            fontSize: 11,
+            fontSize: 13,
             letterSpacing: "0.28em",
             color: M.muted,
             textTransform: "uppercase",
@@ -138,17 +138,17 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: "12px 16px",
+          padding: "14px 18px",
           display: "flex",
           flexDirection: "column",
-          gap: 10,
+          gap: 12,
         }}
       >
         {messages.length === 0 ? (
           <p
             style={{
               color: M.muted,
-              fontSize: 13,
+              fontSize: 16,
               textAlign: "center",
               margin: "auto",
               letterSpacing: "0.02em",
@@ -173,7 +173,7 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
                   <span
                     style={{
                       fontFamily: FONT_DISPLAY,
-                      fontSize: 9.5,
+                      fontSize: 11,
                       letterSpacing: "0.22em",
                       color: M.muted,
                       textTransform: "uppercase",
@@ -185,11 +185,11 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
                 <div
                   style={{
                     maxWidth: "85%",
-                    padding: "7px 12px",
-                    borderRadius: isMe ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
+                    padding: "9px 14px",
+                    borderRadius: isMe ? "14px 14px 5px 14px" : "14px 14px 14px 5px",
                     background: isMe ? M.goldDim : M.surface2,
                     border: `1px solid ${isMe ? "rgba(201,162,83,0.25)" : M.border}`,
-                    fontSize: 14,
+                    fontSize: 17,
                     color: isMe ? "#e8d5a3" : M.text,
                     lineHeight: 1.45,
                     wordBreak: "break-word",
@@ -207,7 +207,7 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
       {/* Input */}
       <div
         style={{
-          padding: "10px 12px",
+          padding: "12px 14px",
           borderTop: `1px solid ${M.border}`,
           display: "flex",
           gap: 8,
@@ -229,9 +229,9 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
             background: M.surface2,
             border: `1px solid ${M.border}`,
             borderRadius: 999,
-            padding: "8px 14px",
+            padding: "10px 16px",
             color: M.text,
-            fontSize: 14,
+            fontSize: 17,
             outline: "none",
           }}
         />
@@ -240,12 +240,12 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
           disabled={!draft.trim() || sending}
           style={{
             flexShrink: 0,
-            padding: "8px 14px",
+            padding: "10px 18px",
             borderRadius: 999,
             border: `1px solid ${draft.trim() ? "rgba(201,162,83,0.35)" : M.border}`,
             background: "transparent",
             color: draft.trim() ? M.gold : M.muted,
-            fontSize: 13,
+            fontSize: 16,
             cursor: draft.trim() && !sending ? "pointer" : "default",
             opacity: !draft.trim() || sending ? 0.4 : 1,
             transition: "all 0.15s",

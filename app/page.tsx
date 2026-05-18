@@ -45,7 +45,7 @@ export default function Home() {
             alignItems: "center",
           }}
         >
-          <Wordmark size={20} />
+          <Wordmark size={24} />
         </header>
 
         <main
@@ -61,7 +61,7 @@ export default function Home() {
             <p
               style={{
                 color: M.text,
-                fontSize: 18,
+                fontSize: 21,
                 lineHeight: 1.5,
                 textAlign: "center",
                 margin: 0,

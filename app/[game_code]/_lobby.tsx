@@ -193,19 +193,19 @@ export default function LobbyView() {
           borderBottom: `1px solid ${M.border}`,
         }}
       >
-        <Wordmark size={18} />
+        <Wordmark size={22} />
         <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 16,
-            fontSize: 12,
+            fontSize: 14,
             color: M.muted,
             letterSpacing: "0.12em",
             textTransform: "uppercase",
           }}
         >
-          <span style={{ fontSize: 12, color: M.muted, letterSpacing: "0.1em" }}>
+          <span style={{ fontSize: 14, color: M.muted, letterSpacing: "0.1em" }}>
             {gameCode}
           </span>
         </div>
@@ -225,13 +225,13 @@ export default function LobbyView() {
       >
         {/* Left: lobby content */}
         <div style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
-          <DisplayHeading size={36} style={{ fontWeight: 500 }}>
+          <DisplayHeading size={44} style={{ fontWeight: 500 }}>
             Lobby
           </DisplayHeading>
           <p
             style={{
               color: M.muted,
-              fontSize: 14,
+              fontSize: 16,
               marginTop: 10,
               lineHeight: 1.6,
             }}
@@ -243,7 +243,7 @@ export default function LobbyView() {
             <p
               style={{
                 color: M.blood,
-                fontSize: 13,
+                fontSize: 16,
                 marginTop: 18,
                 letterSpacing: "0.02em",
               }}
@@ -264,7 +264,7 @@ export default function LobbyView() {
             }}
           >
             {players.length === 0 ? (
-              <div style={{ padding: "20px 16px", color: M.muted, fontSize: 13 }}>
+              <div style={{ padding: "22px 18px", color: M.muted, fontSize: 16 }}>
                 Loading players…
               </div>
             ) : (
@@ -290,15 +290,15 @@ export default function LobbyView() {
                         i < players.length - 1 ? `1px solid ${M.border}` : "none",
                     }}
                   >
-                    <div style={{ width: 18, fontSize: 11, color: M.muted }}>
+                    <div style={{ width: 22, fontSize: 13, color: M.muted }}>
                       {String(i + 1).padStart(2, "0")}
                     </div>
-                    <Avatar name={p.name} size={30} dim={!online} />
+                    <Avatar name={p.name} size={40} dim={!online} />
                     <div
                       style={{
                         flex: 1,
                         fontFamily: FONT_DISPLAY,
-                        fontSize: 13,
+                        fontSize: 15,
                         letterSpacing: "0.12em",
                         color: online ? M.text : M.muted,
                         textTransform: "uppercase",
@@ -310,7 +310,7 @@ export default function LobbyView() {
                           style={{
                             marginLeft: 8,
                             fontFamily: "inherit",
-                            fontSize: 9,
+                            fontSize: 11,
                             letterSpacing: "0.25em",
                             color: M.muted,
                           }}
@@ -323,7 +323,7 @@ export default function LobbyView() {
                           style={{
                             marginLeft: 8,
                             fontFamily: "inherit",
-                            fontSize: 9,
+                            fontSize: 11,
                             letterSpacing: "0.25em",
                             color: M.gold,
                           }}
@@ -334,7 +334,7 @@ export default function LobbyView() {
                     </div>
                     <div
                       style={{
-                        fontSize: 11,
+                        fontSize: 13,
                         color: status.color,
                         letterSpacing: "0.18em",
                         textTransform: "uppercase",
@@ -381,7 +381,7 @@ export default function LobbyView() {
               <span
                 style={{
                   alignSelf: "center",
-                  fontSize: 12,
+                  fontSize: 14,
                   color: M.muted,
                   letterSpacing: "0.05em",
                 }}
