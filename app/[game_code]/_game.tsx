@@ -118,7 +118,7 @@ function formatLogEntry(event: GameEvent): string {
   }
 }
 
-export default function GamePage() {
+export default function GameView() {
   const params = useParams<{ game_code: string }>();
   const router = useRouter();
   const gameCode = (params?.game_code ?? "").toUpperCase();
