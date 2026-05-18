@@ -11,6 +11,7 @@ import {
   SmallLabel,
   Wordmark,
 } from "@/components/ui";
+import { AuthHeader } from "@/components/AuthHeader";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -46,6 +47,7 @@ export default function Home() {
           }}
         >
           <Wordmark size={24} />
+          <AuthHeader />
         </header>
 
         <main

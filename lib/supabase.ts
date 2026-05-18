@@ -1,7 +1,14 @@
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/database.types";
+import { createClient } from "@/lib/supabase/client";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+/**
+ * Backwards-compatibility shim for existing client-side imports.
+ *
+ * New code should import `createClient` from `@/lib/supabase/client` (browser)
+ * or `@/lib/supabase/server` (Server Components / Actions / Route Handlers).
+ * This singleton is preserved so that the lobby/game pages keep working
+ * during the auth refactor (Step 1) before the identity pass (Step 2).
+ *
+ * Safe to call from client code only — `createBrowserClient` already
+ * memoizes a singleton internally, so re-creating per import is cheap.
+ */
+export const supabase = createClient();
