@@ -94,10 +94,14 @@ export type Database = {
       }
       games: {
         Row: {
+          challenge_passes: string[]
           created_at: string
           current_turn_player_id: string
           game_code: string
+          lose_influence_reason: string | null
           next_game_code: string | null
+          pending_action: string | null
+          pending_action_target_id: string | null
           pending_ambassador_draw: string[] | null
           pending_target_id: string | null
           status: string
@@ -105,10 +109,14 @@ export type Database = {
           winner_id: string | null
         }
         Insert: {
+          challenge_passes?: string[]
           created_at?: string
           current_turn_player_id: string
           game_code: string
+          lose_influence_reason?: string | null
           next_game_code?: string | null
+          pending_action?: string | null
+          pending_action_target_id?: string | null
           pending_ambassador_draw?: string[] | null
           pending_target_id?: string | null
           status?: string
@@ -116,10 +124,14 @@ export type Database = {
           winner_id?: string | null
         }
         Update: {
+          challenge_passes?: string[]
           created_at?: string
           current_turn_player_id?: string
           game_code?: string
+          lose_influence_reason?: string | null
           next_game_code?: string | null
+          pending_action?: string | null
+          pending_action_target_id?: string | null
           pending_ambassador_draw?: string[] | null
           pending_target_id?: string | null
           status?: string

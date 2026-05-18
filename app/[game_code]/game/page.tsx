@@ -8,9 +8,11 @@ import {
   fetchGameLog,
   fetchGameState,
   loseInfluence,
+  passChallenge,
   performCoup,
   resolveExchange,
   startNextGame,
+  submitChallenge,
   takeAssassinate,
   takeExchange,
   takeForeignAid,
@@ -18,10 +20,25 @@ import {
   takeSteal,
   takeTax,
   ROLE_LABELS,
+  type ChallengeableAction,
   type GameEvent,
   type GameState,
   type Role,
 } from "@/lib/game";
+
+const ACTION_TO_ROLE: Record<ChallengeableAction, Role> = {
+  tax: "duke",
+  steal: "captain",
+  assassinate: "assassin",
+  exchange: "ambassador",
+};
+
+const ACTION_LABELS: Record<ChallengeableAction, string> = {
+  tax: "Tax",
+  steal: "Steal",
+  assassinate: "Assassinate",
+  exchange: "Exchange",
+};
 
 type ConnectionStatus =
   | "CONNECTING"
@@ -67,6 +84,16 @@ function formatLogEntry(event: GameEvent): string {
         ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
         : "an influence";
       return `${n} lost ${roleLabel}.`;
+    }
+    case "challenge": {
+      const role = event.metadata?.role
+        ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
+        : "the claim";
+      // success === true means the challenger correctly identified a bluff.
+      const success = event.metadata?.success === true;
+      return success
+        ? `${n} challenged ${t ?? "someone"}'s ${role} claim — ${t ?? "they"} was bluffing.`
+        : `${n} challenged ${t ?? "someone"}'s ${role} claim — ${t ?? "they"} had it. ${n} loses an influence.`;
     }
     case "eliminated":
       return `${n} is out.`;
@@ -278,6 +305,9 @@ export default function GamePage() {
     currentTurnPlayerId,
     turnPhase,
     pendingTargetId,
+    pendingAction,
+    pendingActionTargetId,
+    challengePasses,
     pendingAmbassadorDraw,
     players,
     status,
@@ -304,6 +334,17 @@ export default function GamePage() {
     (p) =>
       p.playerId !== playerId && p.influences.some((i) => !i.isRevealed),
   );
+
+  // Awaiting-challenge derived state
+  const iAlreadyPassed = challengePasses.includes(playerId);
+  const iCanRespondToChallenge =
+    turnPhase === "awaiting_challenge" &&
+    !isMyTurn &&
+    !iAmEliminated &&
+    !iAlreadyPassed;
+  const pendingActionTarget = pendingActionTargetId
+    ? players.find((p) => p.playerId === pendingActionTargetId)
+    : null;
 
   // Ambassador exchange pool
   const exchangePool: { key: string; label: string; role: Role }[] = [
@@ -462,6 +503,47 @@ export default function GamePage() {
               Waiting for {currentTurnPlayer?.name ?? "someone"} to exchange
               cards…
             </p>
+          ) : turnPhase === "awaiting_challenge" && pendingAction ? (
+            <>
+              <p style={{ marginBottom: 8 }}>
+                <strong>{currentTurnPlayer?.name ?? "Someone"}</strong> claims{" "}
+                <strong>{ROLE_LABELS[ACTION_TO_ROLE[pendingAction]]}</strong> to{" "}
+                {ACTION_LABELS[pendingAction]}
+                {pendingActionTarget ? ` ${pendingAction === "steal" ? "from" : "on"} ${pendingActionTarget.name}` : ""}.
+              </p>
+              {iCanRespondToChallenge ? (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={actionPending}
+                    onClick={() =>
+                      void wrap(() => passChallenge(gameCode, playerId))
+                    }
+                  >
+                    Pass
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionPending}
+                    onClick={() =>
+                      void wrap(() => submitChallenge(gameCode, playerId))
+                    }
+                  >
+                    Challenge
+                  </button>
+                </div>
+              ) : isMyTurn ? (
+                <p style={{ color: "#666" }}>
+                  Waiting for opponents to pass or challenge…
+                </p>
+              ) : iAmEliminated ? (
+                <p style={{ color: "#999" }}>You are out — spectating.</p>
+              ) : iAlreadyPassed ? (
+                <p style={{ color: "#666" }}>
+                  You passed — waiting for other players…
+                </p>
+              ) : null}
+            </>
           ) : iAmEliminated ? (
             <p style={{ color: "#999" }}>You are out — spectating.</p>
           ) : isMyTurn ? (
