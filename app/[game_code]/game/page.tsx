@@ -9,11 +9,18 @@ import {
   fetchGameState,
   loseInfluence,
   performCoup,
+  resolveExchange,
   startNextGame,
-  takeAction,
+  takeAssassinate,
+  takeExchange,
+  takeForeignAid,
+  takeIncome,
+  takeSteal,
+  takeTax,
   ROLE_LABELS,
   type GameEvent,
   type GameState,
+  type Role,
 } from "@/lib/game";
 
 type ConnectionStatus =
@@ -37,34 +44,36 @@ function generateGameCode(length = 4): string {
   return out;
 }
 
-function formatLogEntry(
-  event: GameEvent,
-  players: GameState["players"],
-): string {
+function formatLogEntry(event: GameEvent): string {
+  const n = event.playerName;
+  const t = event.metadata?.targetName;
   switch (event.action) {
-    case "income": {
-      const next = players.find((p) => p.playerId !== event.playerId);
-      return `${event.playerName} took income (+1 coin).${next ? ` ${next.name}'s turn.` : ""}`;
-    }
-    case "foreign_aid": {
-      const next = players.find((p) => p.playerId !== event.playerId);
-      return `${event.playerName} took foreign aid (+2 coins).${next ? ` ${next.name}'s turn.` : ""}`;
-    }
+    case "income":
+      return `${n} took income (+1 coin).`;
+    case "foreign_aid":
+      return `${n} took foreign aid (+2 coins).`;
+    case "tax":
+      return `${n} collected tax (+3 coins).`;
+    case "steal":
+      return `${n} stole ${event.metadata?.amount ?? 2} coin(s) from ${t ?? "someone"}.`;
+    case "assassinate":
+      return `${n} assassinated ${t ?? "someone"}.`;
+    case "exchange":
+      return `${n} exchanged cards.`;
     case "coup":
-      return `${event.playerName} couped ${event.metadata?.targetName ?? "someone"}.`;
+      return `${n} couped ${t ?? "someone"}.`;
     case "lose_influence": {
       const roleLabel = event.metadata?.role
-        ? (ROLE_LABELS[event.metadata.role as keyof typeof ROLE_LABELS] ??
-          event.metadata.role)
+        ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
         : "an influence";
-      return `${event.playerName} lost ${roleLabel}.`;
+      return `${n} lost ${roleLabel}.`;
     }
     case "eliminated":
-      return `${event.playerName} is out.`;
+      return `${n} is out.`;
     case "win":
-      return `${event.playerName} wins!`;
+      return `${n} wins!`;
     default:
-      return `${event.playerName}: ${event.action}`;
+      return `${n}: ${event.action}`;
   }
 }
 
@@ -88,6 +97,11 @@ export default function GamePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [nextGamePending, setNextGamePending] = useState(false);
 
+  // Exchange selection: keys are "held-{influenceId}" or "drawn-{index}"
+  const [exchangeSelection, setExchangeSelection] = useState<Set<string>>(
+    new Set(),
+  );
+
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showError = (msg: string) => {
@@ -109,7 +123,7 @@ export default function GamePage() {
     setEvents(await fetchGameLog(gameCode));
   }, [gameCode]);
 
-  // DB channel — game state + log sync
+  // DB channel
   useEffect(() => {
     if (!playerId || !gameCode) return;
 
@@ -136,8 +150,14 @@ export default function GamePage() {
     };
   }, [gameCode, playerId, refreshGameState, refreshLog]);
 
+  // Only treat the exchange selection as active while the exchange phase is live.
+  // This avoids needing a setState-in-effect reset.
+  const activeExchangeSelection =
+    gameState?.turnPhase === "ambassador_exchange"
+      ? exchangeSelection
+      : new Set<string>();
 
-  // Presence channel — online/offline + connection log
+  // Presence channel
   useEffect(() => {
     if (!playerId || !gameCode || !playerName) return;
 
@@ -145,9 +165,8 @@ export default function GamePage() {
       config: { presence: { key: playerId } },
     });
 
-    const flushOnlineIds = () => {
+    const flushOnlineIds = () =>
       setOnlineIds(new Set(Object.keys(presenceChannel.presenceState())));
-    };
 
     presenceChannel
       .on("presence", { event: "sync" }, flushOnlineIds)
@@ -185,7 +204,7 @@ export default function GamePage() {
   const mergedLog = useMemo(() => {
     const actionEntries = events.map((e) => ({
       key: `action-${e.id}`,
-      message: formatLogEntry(e, gameState?.players ?? []),
+      message: formatLogEntry(e),
       ts: new Date(e.createdAt).getTime(),
       id: e.id,
     }));
@@ -195,14 +214,12 @@ export default function GamePage() {
       ts: e.ts,
       id: null,
     }));
-    // Sort: action entries by event id (stable insert order), connection events
-    // by wall-clock timestamp, interleaved by timestamp.
     return [...actionEntries, ...connEntries].sort((a, b) => {
       if (a.ts !== b.ts) return a.ts - b.ts;
       if (a.id !== null && b.id !== null) return a.id - b.id;
       return 0;
     });
-  }, [events, connectionLog, gameState?.players]);
+  }, [events, connectionLog]);
 
   const wrap = async (fn: () => Promise<void>) => {
     setActionPending(true);
@@ -226,6 +243,18 @@ export default function GamePage() {
     }
   };
 
+  const toggleExchangeCard = (key: string, limit: number) => {
+    setExchangeSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else if (next.size < limit) {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   // ── Early returns ───────────────────────────────────────────────────────────
 
   if (!playerId) {
@@ -245,25 +274,62 @@ export default function GamePage() {
     );
   }
 
-  const { currentTurnPlayerId, turnPhase, pendingTargetId, players, status, winnerId } =
-    gameState;
+  const {
+    currentTurnPlayerId,
+    turnPhase,
+    pendingTargetId,
+    pendingAmbassadorDraw,
+    players,
+    status,
+    winnerId,
+  } = gameState;
+
   const me = players.find((p) => p.playerId === playerId);
-  const currentTurnPlayer = players.find((p) => p.playerId === currentTurnPlayerId);
+  const currentTurnPlayer = players.find(
+    (p) => p.playerId === currentTurnPlayerId,
+  );
   const winner = players.find((p) => p.playerId === winnerId);
   const isMyTurn = currentTurnPlayerId === playerId;
   const iMustLoseInfluence =
     turnPhase === "lose_influence" && pendingTargetId === playerId;
+  const isMyExchange =
+    turnPhase === "ambassador_exchange" && isMyTurn;
   const mustCoup = isMyTurn && turnPhase === "action" && (me?.coins ?? 0) >= 10;
   const canCoup = (me?.coins ?? 0) >= 7;
+  const canAssassinate = (me?.coins ?? 0) >= 3;
+  const canStealFrom = (p: { coins: number }) => p.coins > 0;
   const myLiveInfluences = (me?.influences ?? []).filter((i) => !i.isRevealed);
   const iAmEliminated = myLiveInfluences.length === 0;
+  const aliveOpponents = players.filter(
+    (p) =>
+      p.playerId !== playerId && p.influences.some((i) => !i.isRevealed),
+  );
+
+  // Ambassador exchange pool
+  const exchangePool: { key: string; label: string; role: Role }[] = [
+    ...myLiveInfluences.map((i) => ({
+      key: `held-${i.id}`,
+      label: `Your card: ${ROLE_LABELS[i.role]}`,
+      role: i.role,
+    })),
+    ...(pendingAmbassadorDraw ?? []).map((role, idx) => ({
+      key: `drawn-${idx}`,
+      label: `Drawn: ${ROLE_LABELS[role]}`,
+      role,
+    })),
+  ];
+
+  const handleResolveExchange = (selection: Set<string>) => {
+    const kept: Role[] = exchangePool
+      .filter((c) => selection.has(c.key))
+      .map((c) => c.role);
+    void wrap(() => resolveExchange(gameCode, playerId, kept));
+  };
 
   return (
     <main style={{ padding: 24, fontFamily: "sans-serif" }}>
       {/* Header */}
-      <header
-        style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}
-      >
+      <header style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0 }}>{gameCode}</h1>
         <span style={{ color: "#666", fontSize: 13 }}>
           db: <code>{dbStatus}</code> · presence: <code>{presenceStatus}</code>
@@ -280,35 +346,35 @@ export default function GamePage() {
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {players.map((p) => {
             const isOnline = onlineIds.has(p.playerId);
-            const isTurn = p.playerId === currentTurnPlayerId && status === "in_progress";
+            const isTurn =
+              p.playerId === currentTurnPlayerId && status === "in_progress";
             const isMe = p.playerId === playerId;
-            const isEliminated = p.influences.every((i) => i.isRevealed);
+            const isElim = p.influences.every((i) => i.isRevealed);
             return (
               <li
                 key={p.playerId}
                 style={{
                   padding: "6px 0",
                   fontWeight: isTurn ? "bold" : "normal",
-                  color: isEliminated ? "#999" : isOnline ? "inherit" : "#bbb",
-                  textDecoration: isEliminated ? "line-through" : "none",
+                  color: isElim ? "#999" : isOnline ? "inherit" : "#bbb",
+                  textDecoration: isElim ? "line-through" : "none",
                 }}
               >
                 {p.name}
                 {isMe ? " (you)" : ""}
-                {isEliminated ? " — out" : ` — ${p.coins} coin${p.coins !== 1 ? "s" : ""}`}
+                {isElim
+                  ? " — out"
+                  : ` — ${p.coins} coin${p.coins !== 1 ? "s" : ""}`}
                 {isTurn ? " ← current turn" : ""}
-                {!isEliminated && !isOnline ? " (offline)" : ""}
-                {/* Influences */}
-                {!isEliminated && (
+                {!isElim && !isOnline ? " (offline)" : ""}
+                {!isElim && (
                   <ul style={{ listStyle: "none", padding: "4px 0 0 16px", margin: 0, fontSize: 13 }}>
                     {p.influences.map((inf) => (
                       <li
                         key={inf.id}
                         style={{ color: inf.isRevealed ? "#c00" : "inherit" }}
                       >
-                        {isMe || inf.isRevealed
-                          ? ROLE_LABELS[inf.role]
-                          : "Hidden"}
+                        {isMe || inf.isRevealed ? ROLE_LABELS[inf.role] : "Hidden"}
                         {inf.isRevealed ? " (revealed)" : ""}
                       </li>
                     ))}
@@ -320,13 +386,13 @@ export default function GamePage() {
         </ul>
       </section>
 
-      {/* Action area — hidden once game is over */}
+      {/* Action area */}
       {status === "in_progress" && (
         <section style={{ marginTop: 24 }}>
           {iMustLoseInfluence ? (
             <>
               <p style={{ fontWeight: "bold", marginBottom: 10 }}>
-                You have been couped — choose an influence to lose:
+                You must lose an influence — choose a card:
               </p>
               <div style={{ display: "flex", gap: 10 }}>
                 {myLiveInfluences.map((inf) => (
@@ -348,7 +414,53 @@ export default function GamePage() {
               Waiting for{" "}
               {players.find((p) => p.playerId === pendingTargetId)?.name ??
                 "opponent"}{" "}
-              to choose an influence…
+              to choose a card to lose…
+            </p>
+          ) : isMyExchange ? (
+            <>
+              <p style={{ fontWeight: "bold", marginBottom: 8 }}>
+                Choose {myLiveInfluences.length} card{myLiveInfluences.length !== 1 ? "s" : ""} to keep:
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                {exchangePool.map((card) => {
+                  const selected = activeExchangeSelection.has(card.key);
+                  return (
+                    <button
+                      key={card.key}
+                      type="button"
+                      disabled={
+                        actionPending ||
+                        (!selected &&
+                          activeExchangeSelection.size >= myLiveInfluences.length)
+                      }
+                      onClick={() =>
+                        toggleExchangeCard(card.key, myLiveInfluences.length)
+                      }
+                      style={{
+                        outline: selected ? "2px solid #0070f3" : "none",
+                        fontWeight: selected ? "bold" : "normal",
+                      }}
+                    >
+                      {card.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                disabled={
+                  actionPending ||
+                  activeExchangeSelection.size !== myLiveInfluences.length
+                }
+                onClick={() => handleResolveExchange(activeExchangeSelection)}
+              >
+                Confirm ({activeExchangeSelection.size}/{myLiveInfluences.length} selected)
+              </button>
+            </>
+          ) : turnPhase === "ambassador_exchange" ? (
+            <p style={{ color: "#666" }}>
+              Waiting for {currentTurnPlayer?.name ?? "someone"} to exchange
+              cards…
             </p>
           ) : iAmEliminated ? (
             <p style={{ color: "#999" }}>You are out — spectating.</p>
@@ -359,49 +471,96 @@ export default function GamePage() {
                   You have 10+ coins — you must Coup!
                 </p>
               )}
-              <p style={{ marginBottom: 10 }}>Your turn — choose an action:</p>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <p style={{ marginBottom: 8 }}>Your turn:</p>
+
+              {/* General actions */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                 <button
                   type="button"
                   disabled={actionPending || mustCoup}
-                  onClick={() =>
-                    void wrap(() => takeAction(gameCode, playerId, "income"))
-                  }
+                  onClick={() => void wrap(() => takeIncome(gameCode, playerId))}
                 >
-                  Take Income (+1)
+                  Income (+1)
                 </button>
                 <button
                   type="button"
                   disabled={actionPending || mustCoup}
                   onClick={() =>
-                    void wrap(() =>
-                      takeAction(gameCode, playerId, "foreign_aid"),
-                    )
+                    void wrap(() => takeForeignAid(gameCode, playerId))
                   }
                 >
-                  Take Foreign Aid (+2)
+                  Foreign Aid (+2)
                 </button>
-                {players
-                  .filter(
-                    (p) =>
-                      p.playerId !== playerId &&
-                      p.influences.some((i) => !i.isRevealed),
-                  )
-                  .map((target) => (
-                    <button
-                      key={target.playerId}
-                      type="button"
-                      disabled={actionPending || !canCoup}
-                      onClick={() =>
-                        void wrap(() =>
-                          performCoup(gameCode, playerId, target.playerId),
-                        )
-                      }
-                    >
-                      Coup {target.name} (7 coins)
-                    </button>
-                  ))}
+                <button
+                  type="button"
+                  disabled={actionPending || mustCoup}
+                  onClick={() => void wrap(() => takeTax(gameCode, playerId))}
+                >
+                  Tax — Duke (+3)
+                </button>
+                <button
+                  type="button"
+                  disabled={actionPending || mustCoup}
+                  onClick={() =>
+                    void wrap(() => takeExchange(gameCode, playerId))
+                  }
+                >
+                  Exchange — Ambassador
+                </button>
               </div>
+
+              {/* Per-opponent actions */}
+              {aliveOpponents.map((target) => (
+                <div
+                  key={target.playerId}
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    marginBottom: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <span style={{ minWidth: 80, fontSize: 13, color: "#555" }}>
+                    vs {target.name}:
+                  </span>
+                  <button
+                    type="button"
+                    disabled={
+                      actionPending || mustCoup || !canStealFrom(target)
+                    }
+                    onClick={() =>
+                      void wrap(() =>
+                        takeSteal(gameCode, playerId, target.playerId),
+                      )
+                    }
+                  >
+                    Steal — Captain
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionPending || mustCoup || !canAssassinate}
+                    onClick={() =>
+                      void wrap(() =>
+                        takeAssassinate(gameCode, playerId, target.playerId),
+                      )
+                    }
+                  >
+                    Assassinate — Assassin (3 coins)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={actionPending || !canCoup}
+                    onClick={() =>
+                      void wrap(() =>
+                        performCoup(gameCode, playerId, target.playerId),
+                      )
+                    }
+                  >
+                    Coup (7 coins)
+                  </button>
+                </div>
+              ))}
             </>
           ) : (
             <p style={{ color: "#666" }}>
@@ -422,10 +581,7 @@ export default function GamePage() {
               : "Game over"}
           </h2>
           <div style={{ display: "flex", gap: 12 }}>
-            <button
-              type="button"
-              onClick={() => router.push("/")}
-            >
+            <button type="button" onClick={() => router.push("/")}>
               Quit
             </button>
             <button

@@ -98,6 +98,7 @@ export type Database = {
           current_turn_player_id: string
           game_code: string
           next_game_code: string | null
+          pending_ambassador_draw: string[] | null
           pending_target_id: string | null
           status: string
           turn_phase: string
@@ -108,6 +109,7 @@ export type Database = {
           current_turn_player_id: string
           game_code: string
           next_game_code?: string | null
+          pending_ambassador_draw?: string[] | null
           pending_target_id?: string | null
           status?: string
           turn_phase?: string
@@ -118,6 +120,7 @@ export type Database = {
           current_turn_player_id?: string
           game_code?: string
           next_game_code?: string | null
+          pending_ambassador_draw?: string[] | null
           pending_target_id?: string | null
           status?: string
           turn_phase?: string

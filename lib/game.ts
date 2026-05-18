@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type GameStatus = "in_progress" | "finished";
-export type TurnPhase = "action" | "lose_influence";
+export type TurnPhase = "action" | "lose_influence" | "ambassador_exchange";
 export type Role =
   | "duke"
   | "assassin"
@@ -40,15 +40,20 @@ export type GameState = {
   currentTurnPlayerId: string;
   turnPhase: TurnPhase;
   pendingTargetId: string | null;
+  pendingAmbassadorDraw: Role[] | null;
   winnerId: string | null;
   nextGameCode: string | null;
   players: GamePlayer[];
 };
 
-// Actions a player initiates, plus system events written to game_events
+// Player-initiated actions + system events written to game_events
 export type GameAction =
   | "income"
   | "foreign_aid"
+  | "tax"
+  | "steal"
+  | "assassinate"
+  | "exchange"
   | "coup"
   | "lose_influence"
   | "eliminated"
@@ -58,6 +63,7 @@ export type GameEventMetadata = {
   targetPlayerId?: string;
   targetName?: string;
   role?: string;
+  amount?: number; // coins stolen
 };
 
 export type GameEvent = {
@@ -90,7 +96,11 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-// ─── Mutations ───────────────────────────────────────────────────────────────
+function randomRole(): Role {
+  return ROLES[Math.floor(Math.random() * ROLES.length)] as Role;
+}
+
+// ─── Game setup ──────────────────────────────────────────────────────────────
 
 export async function startGame(
   gameCode: string,
@@ -143,11 +153,39 @@ export async function startGame(
   if (influencesError) throw influencesError;
 }
 
-/** Income or Foreign Aid — coin gain, turn advances immediately. */
-export async function takeAction(
+// ─── Basic actions (no role needed) ─────────────────────────────────────────
+
+/** Take 1 coin. */
+export async function takeIncome(
   gameCode: string,
   playerId: string,
-  action: "income" | "foreign_aid",
+): Promise<void> {
+  await _takeCoinAction(gameCode, playerId, "income", 1);
+}
+
+/** Take 2 coins (Foreign Aid). */
+export async function takeForeignAid(
+  gameCode: string,
+  playerId: string,
+): Promise<void> {
+  await _takeCoinAction(gameCode, playerId, "foreign_aid", 2);
+}
+
+// ─── Role actions ────────────────────────────────────────────────────────────
+
+/** Duke: collect 3 coins from the treasury. */
+export async function takeTax(
+  gameCode: string,
+  playerId: string,
+): Promise<void> {
+  await _takeCoinAction(gameCode, playerId, "tax", 3);
+}
+
+/** Captain: steal up to 2 coins from a target player. */
+export async function takeSteal(
+  gameCode: string,
+  playerId: string,
+  targetPlayerId: string,
 ): Promise<void> {
   const state = await fetchGameState(gameCode);
   if (!state) throw new Error("Game not found");
@@ -158,14 +196,25 @@ export async function takeAction(
   if (!self) throw new Error("Player not in game");
   if (self.coins >= 10) throw new Error("You have 10+ coins — you must Coup");
 
-  const delta = action === "income" ? 1 : 2;
+  const target = state.players.find((p) => p.playerId === targetPlayerId);
+  if (!target) throw new Error("Target player not in game");
 
-  const { error: coinsError } = await supabase
+  const stolen = Math.min(2, target.coins);
+  if (stolen === 0) throw new Error("Target has no coins to steal");
+
+  const { error: actorCoinsError } = await supabase
     .from("game_players")
-    .update({ coins: self.coins + delta })
+    .update({ coins: self.coins + stolen })
     .eq("player_id", playerId)
     .eq("game_code", gameCode);
-  if (coinsError) throw coinsError;
+  if (actorCoinsError) throw actorCoinsError;
+
+  const { error: targetCoinsError } = await supabase
+    .from("game_players")
+    .update({ coins: target.coins - stolen })
+    .eq("player_id", targetPlayerId)
+    .eq("game_code", gameCode);
+  if (targetCoinsError) throw targetCoinsError;
 
   const nextPlayerId = nextAliveTurnOrder(state, playerId);
   const { error: turnError } = await supabase
@@ -177,10 +226,155 @@ export async function takeAction(
   const { error: eventError } = await supabase.from("game_events").insert({
     game_code: gameCode,
     player_id: playerId,
-    action,
+    action: "steal",
+    metadata: { targetPlayerId, targetName: target.name, amount: stolen },
   });
   if (eventError) throw eventError;
 }
+
+/**
+ * Assassin: pay 3 coins to force target to lose an influence.
+ * Reuses the same lose_influence phase as Coup.
+ */
+export async function takeAssassinate(
+  gameCode: string,
+  playerId: string,
+  targetPlayerId: string,
+): Promise<void> {
+  const state = await fetchGameState(gameCode);
+  if (!state) throw new Error("Game not found");
+  if (state.currentTurnPlayerId !== playerId) throw new Error("Not your turn");
+  if (state.turnPhase !== "action") throw new Error("Not in action phase");
+
+  const self = state.players.find((p) => p.playerId === playerId);
+  if (!self) throw new Error("Player not in game");
+  if (self.coins >= 10) throw new Error("You have 10+ coins — you must Coup");
+  if (self.coins < 3) throw new Error("Need at least 3 coins to Assassinate");
+
+  const target = state.players.find((p) => p.playerId === targetPlayerId);
+  if (!target) throw new Error("Target player not in game");
+
+  const { error: coinsError } = await supabase
+    .from("game_players")
+    .update({ coins: self.coins - 3 })
+    .eq("player_id", playerId)
+    .eq("game_code", gameCode);
+  if (coinsError) throw coinsError;
+
+  const { error: phaseError } = await supabase
+    .from("games")
+    .update({
+      turn_phase: "lose_influence",
+      pending_target_id: targetPlayerId,
+    })
+    .eq("game_code", gameCode);
+  if (phaseError) throw phaseError;
+
+  const { error: eventError } = await supabase.from("game_events").insert({
+    game_code: gameCode,
+    player_id: playerId,
+    action: "assassinate",
+    metadata: { targetPlayerId, targetName: target.name },
+  });
+  if (eventError) throw eventError;
+}
+
+/**
+ * Ambassador: draw 2 random cards and transition to the exchange phase.
+ * The acting player then picks which cards to keep via resolveExchange().
+ */
+export async function takeExchange(
+  gameCode: string,
+  playerId: string,
+): Promise<void> {
+  const state = await fetchGameState(gameCode);
+  if (!state) throw new Error("Game not found");
+  if (state.currentTurnPlayerId !== playerId) throw new Error("Not your turn");
+  if (state.turnPhase !== "action") throw new Error("Not in action phase");
+
+  const self = state.players.find((p) => p.playerId === playerId);
+  if (!self) throw new Error("Player not in game");
+  if (self.coins >= 10) throw new Error("You have 10+ coins — you must Coup");
+
+  const drawn: Role[] = [randomRole(), randomRole()];
+
+  const { error } = await supabase
+    .from("games")
+    .update({
+      turn_phase: "ambassador_exchange",
+      pending_ambassador_draw: drawn,
+    })
+    .eq("game_code", gameCode);
+  if (error) throw error;
+}
+
+/**
+ * Complete an Ambassador exchange.
+ * keptRoles must have exactly as many entries as the player's live influences.
+ * Each role must be available in the combined pool of current live cards + drawn cards.
+ */
+export async function resolveExchange(
+  gameCode: string,
+  playerId: string,
+  keptRoles: Role[],
+): Promise<void> {
+  const state = await fetchGameState(gameCode);
+  if (!state) throw new Error("Game not found");
+  if (state.turnPhase !== "ambassador_exchange")
+    throw new Error("Not in exchange phase");
+  if (state.currentTurnPlayerId !== playerId) throw new Error("Not your turn");
+
+  const self = state.players.find((p) => p.playerId === playerId);
+  if (!self) throw new Error("Player not in game");
+
+  const live = self.influences.filter((i) => !i.isRevealed);
+  if (keptRoles.length !== live.length) {
+    throw new Error(`Must keep exactly ${live.length} card(s)`);
+  }
+
+  // Validate selection against pool = live roles + drawn cards
+  const draw = state.pendingAmbassadorDraw ?? [];
+  const pool: Role[] = [
+    ...live.map((i) => i.role),
+    ...draw,
+  ];
+  const remaining = [...pool];
+  for (const role of keptRoles) {
+    const idx = remaining.indexOf(role);
+    if (idx === -1)
+      throw new Error(`Card "${role}" is not available in the pool`);
+    remaining.splice(idx, 1);
+  }
+
+  // Rewrite each live influence slot with the chosen roles (in position order)
+  for (let i = 0; i < live.length; i++) {
+    const { error } = await supabase
+      .from("player_influences")
+      .update({ role: keptRoles[i] })
+      .eq("id", live[i].id);
+    if (error) throw error;
+  }
+
+  const nextPlayerId = nextAliveTurnOrder(state, playerId);
+  const { error: turnError } = await supabase
+    .from("games")
+    .update({
+      turn_phase: "action",
+      pending_ambassador_draw: null,
+      current_turn_player_id: nextPlayerId,
+    })
+    .eq("game_code", gameCode);
+  if (turnError) throw turnError;
+
+  const { error: eventError } = await supabase.from("game_events").insert({
+    game_code: gameCode,
+    player_id: playerId,
+    action: "exchange",
+  });
+  if (eventError) throw eventError;
+}
+
+// ─── Coup ────────────────────────────────────────────────────────────────────
 
 /**
  * Coup — costs 7 coins, transitions to lose_influence phase.
@@ -259,7 +453,6 @@ export async function loseInfluence(
     .eq("id", influenceId);
   if (revealError) throw revealError;
 
-  // Log the reveal first
   const { error: loseEventError } = await supabase
     .from("game_events")
     .insert({
@@ -270,7 +463,7 @@ export async function loseInfluence(
     });
   if (loseEventError) throw loseEventError;
 
-  // Compute updated influences for the target to check elimination
+  // Compute updated influences to check for elimination
   const updatedInfluences = (self?.influences ?? []).map((i) =>
     i.id === influenceId ? { ...i, isRevealed: true } : i,
   );
@@ -279,15 +472,11 @@ export async function loseInfluence(
   if (isEliminated) {
     const { error: elimEventError } = await supabase
       .from("game_events")
-      .insert({
-        game_code: gameCode,
-        player_id: playerId,
-        action: "eliminated",
-      });
+      .insert({ game_code: gameCode, player_id: playerId, action: "eliminated" });
     if (elimEventError) throw elimEventError;
   }
 
-  // Build updated player list to check for a winner and compute next turn
+  // Check for a winner
   const updatedPlayers = state.players.map((p) =>
     p.playerId === playerId ? { ...p, influences: updatedInfluences } : p,
   );
@@ -318,7 +507,6 @@ export async function loseInfluence(
       .eq("game_code", gameCode);
     if (finishError) throw finishError;
   } else {
-    // Advance turn, skipping any eliminated players
     const updatedState: GameState = { ...state, players: updatedPlayers };
     const nextPlayerId = nextAliveTurnOrder(
       updatedState,
@@ -338,24 +526,20 @@ export async function loseInfluence(
 
 /**
  * Returns the canonical next-game lobby code for a finished game.
- *
- * The first caller writes `proposedNextCode`; subsequent callers (race
- * condition or a second player also clicking "Play Again") get back whatever
- * code was already stored. This guarantees every "Play Again" click lands in
- * the same lobby while each player navigates independently.
+ * The first caller writes proposedNextCode; subsequent callers get back
+ * whatever code was already stored. All "Play Again" clickers land in the
+ * same lobby while each player navigates independently.
  */
 export async function startNextGame(
   currentGameCode: string,
   proposedNextCode: string,
 ): Promise<string> {
-  // Attempt to be the first writer; no-op if already set.
   await supabase
     .from("games")
     .update({ next_game_code: proposedNextCode })
     .eq("game_code", currentGameCode)
     .is("next_game_code", null);
 
-  // Read back the canonical code (ours or a concurrent writer's).
   const { data, error } = await supabase
     .from("games")
     .select("next_game_code")
@@ -388,7 +572,7 @@ export async function fetchGameState(
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, winner_id, next_game_code",
+      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_ambassador_draw, winner_id, next_game_code",
     )
     .eq("game_code", gameCode)
     .single();
@@ -447,6 +631,7 @@ export async function fetchGameState(
     currentTurnPlayerId: game.current_turn_player_id,
     turnPhase: game.turn_phase as TurnPhase,
     pendingTargetId: game.pending_target_id,
+    pendingAmbassadorDraw: game.pending_ambassador_draw as Role[] | null,
     winnerId: game.winner_id,
     nextGameCode: game.next_game_code,
     players,
@@ -467,7 +652,7 @@ export async function fetchGameLog(gameCode: string): Promise<GameEvent[]> {
     .from("game_events")
     .select("id, player_id, action, metadata, created_at, players(name)")
     .eq("game_code", gameCode)
-    .order("id", { ascending: true }); // id is monotonically increasing → stable order
+    .order("id", { ascending: true });
 
   if (error) throw error;
 
@@ -500,6 +685,45 @@ function nextAliveTurnOrder(
     }
   }
 
-  // Fallback: return current player (shouldn't happen when game is ongoing)
   return currentPlayerId;
+}
+
+// ─── Internal ────────────────────────────────────────────────────────────────
+
+/** Shared logic for single-player coin-gain actions that end the turn immediately. */
+async function _takeCoinAction(
+  gameCode: string,
+  playerId: string,
+  action: "income" | "foreign_aid" | "tax",
+  delta: number,
+): Promise<void> {
+  const state = await fetchGameState(gameCode);
+  if (!state) throw new Error("Game not found");
+  if (state.currentTurnPlayerId !== playerId) throw new Error("Not your turn");
+  if (state.turnPhase !== "action") throw new Error("Not in action phase");
+
+  const self = state.players.find((p) => p.playerId === playerId);
+  if (!self) throw new Error("Player not in game");
+  if (self.coins >= 10) throw new Error("You have 10+ coins — you must Coup");
+
+  const { error: coinsError } = await supabase
+    .from("game_players")
+    .update({ coins: self.coins + delta })
+    .eq("player_id", playerId)
+    .eq("game_code", gameCode);
+  if (coinsError) throw coinsError;
+
+  const nextPlayerId = nextAliveTurnOrder(state, playerId);
+  const { error: turnError } = await supabase
+    .from("games")
+    .update({ current_turn_player_id: nextPlayerId })
+    .eq("game_code", gameCode);
+  if (turnError) throw turnError;
+
+  const { error: eventError } = await supabase.from("game_events").insert({
+    game_code: gameCode,
+    player_id: playerId,
+    action,
+  });
+  if (eventError) throw eventError;
 }
