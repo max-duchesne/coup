@@ -103,6 +103,8 @@ export type Database = {
           pending_action: string | null
           pending_action_target_id: string | null
           pending_ambassador_draw: string[] | null
+          pending_block_role: string | null
+          pending_blocker_id: string | null
           pending_target_id: string | null
           status: string
           turn_phase: string
@@ -118,6 +120,8 @@ export type Database = {
           pending_action?: string | null
           pending_action_target_id?: string | null
           pending_ambassador_draw?: string[] | null
+          pending_block_role?: string | null
+          pending_blocker_id?: string | null
           pending_target_id?: string | null
           status?: string
           turn_phase?: string
@@ -133,6 +137,8 @@ export type Database = {
           pending_action?: string | null
           pending_action_target_id?: string | null
           pending_ambassador_draw?: string[] | null
+          pending_block_role?: string | null
+          pending_blocker_id?: string | null
           pending_target_id?: string | null
           status?: string
           turn_phase?: string

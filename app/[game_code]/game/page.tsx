@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { usePlayer } from "@/lib/player";
 import {
+  ACTION_CLAIMED_ROLE,
+  eligibleBlockRoles,
   fetchGameLog,
   fetchGameState,
   loseInfluence,
@@ -12,6 +14,7 @@ import {
   performCoup,
   resolveExchange,
   startNextGame,
+  submitBlock,
   submitChallenge,
   takeAssassinate,
   takeExchange,
@@ -20,24 +23,24 @@ import {
   takeSteal,
   takeTax,
   ROLE_LABELS,
-  type ChallengeableAction,
   type GameEvent,
   type GameState,
+  type PendingAction,
   type Role,
 } from "@/lib/game";
 
-const ACTION_TO_ROLE: Record<ChallengeableAction, Role> = {
-  tax: "duke",
-  steal: "captain",
-  assassinate: "assassin",
-  exchange: "ambassador",
-};
-
-const ACTION_LABELS: Record<ChallengeableAction, string> = {
+const ACTION_LABELS: Record<PendingAction, string> = {
+  foreign_aid: "Foreign Aid",
   tax: "Tax",
   steal: "Steal",
   assassinate: "Assassinate",
   exchange: "Exchange",
+};
+
+/** Preposition before the target name in the action banner ("steal from Bob"). */
+const TARGET_PREPOSITION: Partial<Record<PendingAction, string>> = {
+  steal: "from",
+  assassinate: "on",
 };
 
 type ConnectionStatus =
@@ -89,11 +92,22 @@ function formatLogEntry(event: GameEvent): string {
       const role = event.metadata?.role
         ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
         : "the claim";
+      const isBlock = event.metadata?.isBlock === true;
       // success === true means the challenger correctly identified a bluff.
       const success = event.metadata?.success === true;
+      const claimDescriptor = isBlock ? `${role} block` : `${role} claim`;
       return success
-        ? `${n} challenged ${t ?? "someone"}'s ${role} claim — ${t ?? "they"} was bluffing.`
-        : `${n} challenged ${t ?? "someone"}'s ${role} claim — ${t ?? "they"} had it. ${n} loses an influence.`;
+        ? `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — ${t ?? "they"} was bluffing.`
+        : `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — ${t ?? "they"} had it. ${n} loses an influence.`;
+    }
+    case "block": {
+      const role = event.metadata?.role
+        ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
+        : "an influence";
+      const blockedAction = event.metadata?.action
+        ? (ACTION_LABELS[event.metadata.action] ?? event.metadata.action)
+        : "the action";
+      return `${n} blocked ${t ?? "someone"}'s ${blockedAction} (claiming ${role}).`;
     }
     case "eliminated":
       return `${n} is out.`;
@@ -307,6 +321,8 @@ export default function GamePage() {
     pendingTargetId,
     pendingAction,
     pendingActionTargetId,
+    pendingBlockerId,
+    pendingBlockRole,
     challengePasses,
     pendingAmbassadorDraw,
     players,
@@ -337,11 +353,30 @@ export default function GamePage() {
 
   // Awaiting-challenge derived state
   const iAlreadyPassed = challengePasses.includes(playerId);
-  const iCanRespondToChallenge =
+  const inBlockChallenge =
+    turnPhase === "awaiting_challenge" && pendingBlockerId !== null;
+  const blocker = pendingBlockerId
+    ? players.find((p) => p.playerId === pendingBlockerId)
+    : null;
+  // The "owner" of the current claim (action or block) cannot respond to it.
+  const claimOwnerId = pendingBlockerId ?? currentTurnPlayerId;
+  const iAmClaimOwner = playerId === claimOwnerId;
+  // Players can pass during awaiting_challenge if they're alive, didn't make
+  // the claim, and haven't already passed.
+  const iCanRespond =
     turnPhase === "awaiting_challenge" &&
-    !isMyTurn &&
+    !iAmClaimOwner &&
     !iAmEliminated &&
     !iAlreadyPassed;
+  // Challenge button hides when the claim has no role to challenge
+  // (foreign_aid action — only the block on it is challengeable).
+  const claimHasRole = inBlockChallenge
+    ? pendingBlockRole !== null
+    : pendingAction !== null && ACTION_CLAIMED_ROLE[pendingAction] !== null;
+  const myBlockRoles =
+    turnPhase === "awaiting_challenge" && !inBlockChallenge
+      ? eligibleBlockRoles(gameState, playerId)
+      : [];
   const pendingActionTarget = pendingActionTargetId
     ? players.find((p) => p.playerId === pendingActionTargetId)
     : null;
@@ -505,14 +540,36 @@ export default function GamePage() {
             </p>
           ) : turnPhase === "awaiting_challenge" && pendingAction ? (
             <>
-              <p style={{ marginBottom: 8 }}>
-                <strong>{currentTurnPlayer?.name ?? "Someone"}</strong> claims{" "}
-                <strong>{ROLE_LABELS[ACTION_TO_ROLE[pendingAction]]}</strong> to{" "}
-                {ACTION_LABELS[pendingAction]}
-                {pendingActionTarget ? ` ${pendingAction === "steal" ? "from" : "on"} ${pendingActionTarget.name}` : ""}.
-              </p>
-              {iCanRespondToChallenge ? (
-                <div style={{ display: "flex", gap: 8 }}>
+              {/* Banner: what's being claimed */}
+              {inBlockChallenge && pendingBlockRole ? (
+                <p style={{ marginBottom: 8 }}>
+                  <strong>{blocker?.name ?? "Someone"}</strong> blocks{" "}
+                  <strong>{currentTurnPlayer?.name ?? "the actor"}</strong>
+                  &apos;s{" "}
+                  {ACTION_LABELS[pendingAction]} (claiming{" "}
+                  <strong>{ROLE_LABELS[pendingBlockRole]}</strong>).
+                </p>
+              ) : pendingAction === "foreign_aid" ? (
+                <p style={{ marginBottom: 8 }}>
+                  <strong>{currentTurnPlayer?.name ?? "Someone"}</strong> takes{" "}
+                  <strong>Foreign Aid</strong>.
+                </p>
+              ) : ACTION_CLAIMED_ROLE[pendingAction] ? (
+                <p style={{ marginBottom: 8 }}>
+                  <strong>{currentTurnPlayer?.name ?? "Someone"}</strong> claims{" "}
+                  <strong>
+                    {ROLE_LABELS[ACTION_CLAIMED_ROLE[pendingAction]!]}
+                  </strong>{" "}
+                  to {ACTION_LABELS[pendingAction]}
+                  {pendingActionTarget
+                    ? ` ${TARGET_PREPOSITION[pendingAction] ?? "on"} ${pendingActionTarget.name}`
+                    : ""}
+                  .
+                </p>
+              ) : null}
+
+              {iCanRespond ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
                     type="button"
                     disabled={actionPending}
@@ -522,19 +579,33 @@ export default function GamePage() {
                   >
                     Pass
                   </button>
-                  <button
-                    type="button"
-                    disabled={actionPending}
-                    onClick={() =>
-                      void wrap(() => submitChallenge(gameCode, playerId))
-                    }
-                  >
-                    Challenge
-                  </button>
+                  {claimHasRole && (
+                    <button
+                      type="button"
+                      disabled={actionPending}
+                      onClick={() =>
+                        void wrap(() => submitChallenge(gameCode, playerId))
+                      }
+                    >
+                      Challenge
+                    </button>
+                  )}
+                  {myBlockRoles.map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      disabled={actionPending}
+                      onClick={() =>
+                        void wrap(() => submitBlock(gameCode, playerId, role))
+                      }
+                    >
+                      Block with {ROLE_LABELS[role]}
+                    </button>
+                  ))}
                 </div>
-              ) : isMyTurn ? (
+              ) : iAmClaimOwner ? (
                 <p style={{ color: "#666" }}>
-                  Waiting for opponents to pass or challenge…
+                  Waiting for opponents to respond…
                 </p>
               ) : iAmEliminated ? (
                 <p style={{ color: "#999" }}>You are out — spectating.</p>
