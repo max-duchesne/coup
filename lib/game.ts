@@ -40,10 +40,19 @@ export type GameState = {
   currentTurnPlayerId: string;
   turnPhase: TurnPhase;
   pendingTargetId: string | null;
+  winnerId: string | null;
+  nextGameCode: string | null;
   players: GamePlayer[];
 };
 
-export type GameAction = "income" | "foreign_aid" | "coup" | "lose_influence";
+// Actions a player initiates, plus system events written to game_events
+export type GameAction =
+  | "income"
+  | "foreign_aid"
+  | "coup"
+  | "lose_influence"
+  | "eliminated"
+  | "win";
 
 export type GameEventMetadata = {
   targetPlayerId?: string;
@@ -87,6 +96,14 @@ export async function startGame(
   gameCode: string,
   playerIds: string[],
 ): Promise<void> {
+  // Remove any previous game with this code. Cascades to game_players,
+  // player_influences, and game_events via ON DELETE CASCADE FK constraints.
+  const { error: cleanupError } = await supabase
+    .from("games")
+    .delete()
+    .eq("game_code", gameCode);
+  if (cleanupError) throw cleanupError;
+
   const { error: gameError } = await supabase.from("games").insert({
     game_code: gameCode,
     current_turn_player_id: playerIds[0],
@@ -126,7 +143,7 @@ export async function startGame(
   if (influencesError) throw influencesError;
 }
 
-/** Income or Foreign Aid — simple coin gain, turn advances immediately. */
+/** Income or Foreign Aid — coin gain, turn advances immediately. */
 export async function takeAction(
   gameCode: string,
   playerId: string,
@@ -143,7 +160,6 @@ export async function takeAction(
 
   const delta = action === "income" ? 1 : 2;
 
-  // TODO: replace sequential writes with an RPC for atomicity
   const { error: coinsError } = await supabase
     .from("game_players")
     .update({ coins: self.coins + delta })
@@ -151,7 +167,7 @@ export async function takeAction(
     .eq("game_code", gameCode);
   if (coinsError) throw coinsError;
 
-  const nextPlayerId = nextInTurnOrder(state, playerId);
+  const nextPlayerId = nextAliveTurnOrder(state, playerId);
   const { error: turnError } = await supabase
     .from("games")
     .update({ current_turn_player_id: nextPlayerId })
@@ -167,9 +183,8 @@ export async function takeAction(
 }
 
 /**
- * Coup — costs 7 coins, forces the target to lose an influence.
- * Transitions the game to the `lose_influence` phase; turn does not advance
- * until the target picks which card to reveal.
+ * Coup — costs 7 coins, transitions to lose_influence phase.
+ * Turn advances after the target picks a card to reveal.
  */
 export async function performCoup(
   gameCode: string,
@@ -198,7 +213,10 @@ export async function performCoup(
 
   const { error: phaseError } = await supabase
     .from("games")
-    .update({ turn_phase: "lose_influence", pending_target_id: targetPlayerId })
+    .update({
+      turn_phase: "lose_influence",
+      pending_target_id: targetPlayerId,
+    })
     .eq("game_code", gameCode);
   if (phaseError) throw phaseError;
 
@@ -212,8 +230,9 @@ export async function performCoup(
 }
 
 /**
- * Lose influence — target player reveals one of their face-down cards.
- * Clears the pending coup, advances to the next player's turn.
+ * Lose influence — target reveals one card.
+ * Handles elimination and win detection.
+ * Skips eliminated players when advancing the turn.
  */
 export async function loseInfluence(
   gameCode: string,
@@ -233,30 +252,117 @@ export async function loseInfluence(
   );
   if (!influence) throw new Error("Invalid influence selection");
 
+  // Reveal the card
   const { error: revealError } = await supabase
     .from("player_influences")
     .update({ is_revealed: true })
     .eq("id", influenceId);
   if (revealError) throw revealError;
 
-  const nextPlayerId = nextInTurnOrder(state, state.currentTurnPlayerId);
-  const { error: turnError } = await supabase
-    .from("games")
-    .update({
-      turn_phase: "action",
-      pending_target_id: null,
-      current_turn_player_id: nextPlayerId,
-    })
-    .eq("game_code", gameCode);
-  if (turnError) throw turnError;
+  // Log the reveal first
+  const { error: loseEventError } = await supabase
+    .from("game_events")
+    .insert({
+      game_code: gameCode,
+      player_id: playerId,
+      action: "lose_influence",
+      metadata: { role: influence.role },
+    });
+  if (loseEventError) throw loseEventError;
 
-  const { error: eventError } = await supabase.from("game_events").insert({
-    game_code: gameCode,
-    player_id: playerId,
-    action: "lose_influence",
-    metadata: { role: influence.role },
-  });
-  if (eventError) throw eventError;
+  // Compute updated influences for the target to check elimination
+  const updatedInfluences = (self?.influences ?? []).map((i) =>
+    i.id === influenceId ? { ...i, isRevealed: true } : i,
+  );
+  const isEliminated = updatedInfluences.every((i) => i.isRevealed);
+
+  if (isEliminated) {
+    const { error: elimEventError } = await supabase
+      .from("game_events")
+      .insert({
+        game_code: gameCode,
+        player_id: playerId,
+        action: "eliminated",
+      });
+    if (elimEventError) throw elimEventError;
+  }
+
+  // Build updated player list to check for a winner and compute next turn
+  const updatedPlayers = state.players.map((p) =>
+    p.playerId === playerId ? { ...p, influences: updatedInfluences } : p,
+  );
+  const alivePlayers = updatedPlayers.filter((p) =>
+    p.influences.some((i) => !i.isRevealed),
+  );
+  const gameOver = alivePlayers.length === 1;
+  const winner = gameOver ? alivePlayers[0] : null;
+
+  if (winner) {
+    const { error: winEventError } = await supabase
+      .from("game_events")
+      .insert({
+        game_code: gameCode,
+        player_id: winner.playerId,
+        action: "win",
+      });
+    if (winEventError) throw winEventError;
+
+    const { error: finishError } = await supabase
+      .from("games")
+      .update({
+        turn_phase: "action",
+        pending_target_id: null,
+        status: "finished",
+        winner_id: winner.playerId,
+      })
+      .eq("game_code", gameCode);
+    if (finishError) throw finishError;
+  } else {
+    // Advance turn, skipping any eliminated players
+    const updatedState: GameState = { ...state, players: updatedPlayers };
+    const nextPlayerId = nextAliveTurnOrder(
+      updatedState,
+      state.currentTurnPlayerId,
+    );
+    const { error: turnError } = await supabase
+      .from("games")
+      .update({
+        turn_phase: "action",
+        pending_target_id: null,
+        current_turn_player_id: nextPlayerId,
+      })
+      .eq("game_code", gameCode);
+    if (turnError) throw turnError;
+  }
+}
+
+/**
+ * Returns the canonical next-game lobby code for a finished game.
+ *
+ * The first caller writes `proposedNextCode`; subsequent callers (race
+ * condition or a second player also clicking "Play Again") get back whatever
+ * code was already stored. This guarantees every "Play Again" click lands in
+ * the same lobby while each player navigates independently.
+ */
+export async function startNextGame(
+  currentGameCode: string,
+  proposedNextCode: string,
+): Promise<string> {
+  // Attempt to be the first writer; no-op if already set.
+  await supabase
+    .from("games")
+    .update({ next_game_code: proposedNextCode })
+    .eq("game_code", currentGameCode)
+    .is("next_game_code", null);
+
+  // Read back the canonical code (ours or a concurrent writer's).
+  const { data, error } = await supabase
+    .from("games")
+    .select("next_game_code")
+    .eq("game_code", currentGameCode)
+    .single();
+  if (error) throw error;
+  return data.next_game_code ?? proposedNextCode;
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -282,7 +388,7 @@ export async function fetchGameState(
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "game_code, status, current_turn_player_id, turn_phase, pending_target_id",
+      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, winner_id, next_game_code",
     )
     .eq("game_code", gameCode)
     .single();
@@ -293,19 +399,21 @@ export async function fetchGameState(
   }
   if (!game) return null;
 
-  const [{ data: gamePlayers, error: playersError }, { data: influencesData, error: influencesError }] =
-    await Promise.all([
-      supabase
-        .from("game_players")
-        .select("player_id, coins, seat_order, players(name)")
-        .eq("game_code", gameCode)
-        .order("seat_order", { ascending: true }),
-      supabase
-        .from("player_influences")
-        .select("id, player_id, role, position, is_revealed")
-        .eq("game_code", gameCode)
-        .order("position", { ascending: true }),
-    ]);
+  const [
+    { data: gamePlayers, error: playersError },
+    { data: influencesData, error: influencesError },
+  ] = await Promise.all([
+    supabase
+      .from("game_players")
+      .select("player_id, coins, seat_order, players(name)")
+      .eq("game_code", gameCode)
+      .order("seat_order", { ascending: true }),
+    supabase
+      .from("player_influences")
+      .select("id, player_id, role, position, is_revealed")
+      .eq("game_code", gameCode)
+      .order("position", { ascending: true }),
+  ]);
 
   if (playersError) throw playersError;
   if (influencesError) throw influencesError;
@@ -339,6 +447,8 @@ export async function fetchGameState(
     currentTurnPlayerId: game.current_turn_player_id,
     turnPhase: game.turn_phase as TurnPhase,
     pendingTargetId: game.pending_target_id,
+    winnerId: game.winner_id,
+    nextGameCode: game.next_game_code,
     players,
   };
 }
@@ -357,7 +467,7 @@ export async function fetchGameLog(gameCode: string): Promise<GameEvent[]> {
     .from("game_events")
     .select("id, player_id, action, metadata, created_at, players(name)")
     .eq("game_code", gameCode)
-    .order("created_at", { ascending: true });
+    .order("id", { ascending: true }); // id is monotonically increasing → stable order
 
   if (error) throw error;
 
@@ -373,11 +483,23 @@ export async function fetchGameLog(gameCode: string): Promise<GameEvent[]> {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function nextInTurnOrder(state: GameState, currentPlayerId: string): string {
+/** Returns the next player in seat order who still has at least one live influence. */
+function nextAliveTurnOrder(
+  state: GameState,
+  currentPlayerId: string,
+): string {
   const current = state.players.find((p) => p.playerId === currentPlayerId);
-  const nextSeat = ((current?.seatOrder ?? 0) + 1) % state.players.length;
-  return (
-    state.players.find((p) => p.seatOrder === nextSeat)?.playerId ??
-    state.players[0].playerId
-  );
+  const currentSeat = current?.seatOrder ?? 0;
+  const n = state.players.length;
+
+  for (let i = 1; i <= n; i++) {
+    const nextSeat = (currentSeat + i) % n;
+    const candidate = state.players.find((p) => p.seatOrder === nextSeat);
+    if (candidate?.influences.some((inf) => !inf.isRevealed)) {
+      return candidate.playerId;
+    }
+  }
+
+  // Fallback: return current player (shouldn't happen when game is ongoing)
+  return currentPlayerId;
 }

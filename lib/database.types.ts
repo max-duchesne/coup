@@ -97,25 +97,31 @@ export type Database = {
           created_at: string
           current_turn_player_id: string
           game_code: string
+          next_game_code: string | null
           pending_target_id: string | null
           status: string
           turn_phase: string
+          winner_id: string | null
         }
         Insert: {
           created_at?: string
           current_turn_player_id: string
           game_code: string
+          next_game_code?: string | null
           pending_target_id?: string | null
           status?: string
           turn_phase?: string
+          winner_id?: string | null
         }
         Update: {
           created_at?: string
           current_turn_player_id?: string
           game_code?: string
+          next_game_code?: string | null
           pending_target_id?: string | null
           status?: string
           turn_phase?: string
+          winner_id?: string | null
         }
         Relationships: [
           {
