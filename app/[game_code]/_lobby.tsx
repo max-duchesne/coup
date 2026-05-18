@@ -21,13 +21,8 @@ import {
   Pill,
   Wordmark,
 } from "@/components/ui";
+import Chat from "@/components/Chat";
 
-type ConnectionStatus =
-  | "CONNECTING"
-  | "SUBSCRIBED"
-  | "CHANNEL_ERROR"
-  | "TIMED_OUT"
-  | "CLOSED";
 
 export default function LobbyView() {
   const params = useParams<{ game_code: string }>();
@@ -38,9 +33,6 @@ export default function LobbyView() {
   const playerId = player.id;
   const playerName = player.name;
 
-  const [dbStatus, setDbStatus] = useState<ConnectionStatus>("CONNECTING");
-  const [presenceStatus, setPresenceStatus] =
-    useState<ConnectionStatus>("CONNECTING");
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [onlineIds, setOnlineIds] = useState<ReadonlySet<string>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -99,9 +91,7 @@ export default function LobbyView() {
           void refreshPlayers();
         },
       )
-      .subscribe((next) => {
-        setDbStatus(next as ConnectionStatus);
-      });
+      .subscribe();
 
     return () => {
       cancelledRef.current = true;
@@ -126,7 +116,6 @@ export default function LobbyView() {
       .on("presence", { event: "join" }, flushOnlineIds)
       .on("presence", { event: "leave" }, flushOnlineIds)
       .subscribe(async (next) => {
-        setPresenceStatus(next as ConnectionStatus);
         if (next === "SUBSCRIBED") {
           await presenceChannel.track({ id: playerId });
         }
@@ -221,10 +210,8 @@ export default function LobbyView() {
             textTransform: "uppercase",
           }}
         >
-          <span style={{ fontSize: 11 }}>
-            db <code style={{ color: connectionColor(dbStatus) }}>{shortStatus(dbStatus)}</code>
-            {" · "}
-            presence <code style={{ color: connectionColor(presenceStatus) }}>{shortStatus(presenceStatus)}</code>
+          <span style={{ fontSize: 12, color: M.muted, letterSpacing: "0.1em" }}>
+            {gameCode}
           </span>
           <Pill size="sm" onClick={() => void leaveLobby()}>
             Leave
@@ -234,21 +221,26 @@ export default function LobbyView() {
 
       <main
         style={{
-          padding: "48px 24px",
+          flex: 1,
           display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
+          gap: 24,
+          padding: "32px 24px",
+          maxWidth: 1100,
+          margin: "0 auto",
+          width: "100%",
+          alignItems: "flex-start",
         }}
       >
-        <div style={{ width: "100%", maxWidth: 560, textAlign: "center" }}>
-          <DisplayHeading size={48} style={{ fontWeight: 500, letterSpacing: "0.06em" }}>
-            {gameCode}
+        {/* Left: lobby content */}
+        <div style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
+          <DisplayHeading size={36} style={{ fontWeight: 500 }}>
+            Lobby
           </DisplayHeading>
           <p
             style={{
               color: M.muted,
               fontSize: 14,
-              marginTop: 12,
+              marginTop: 10,
               lineHeight: 1.6,
             }}
           >
@@ -407,33 +399,16 @@ export default function LobbyView() {
             )}
           </div>
         </div>
+
+        {/* Right: chat */}
+        {playerId && (
+          <div style={{ width: "clamp(220px, 22vw, 280px)", flexShrink: 0, height: "calc(100vh - 120px)", position: "sticky", top: 24 }}>
+            <Chat gameCode={gameCode} playerId={playerId} playerName={playerName} />
+          </div>
+        )}
       </main>
 
     </Frame>
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function shortStatus(s: ConnectionStatus): string {
-  switch (s) {
-    case "SUBSCRIBED":
-      return "ok";
-    case "CONNECTING":
-      return "…";
-    case "CHANNEL_ERROR":
-      return "err";
-    case "TIMED_OUT":
-      return "out";
-    case "CLOSED":
-      return "off";
-  }
-}
-
-function connectionColor(s: ConnectionStatus): string {
-  return s === "SUBSCRIBED"
-    ? M.good
-    : s === "CONNECTING"
-      ? M.muted
-      : M.blood;
-}

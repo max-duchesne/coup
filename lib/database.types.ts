@@ -14,6 +14,41 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_messages: {
+        Row: {
+          created_at: string
+          game_code: string
+          id: number
+          message: string
+          player_id: string
+          player_name: string
+        }
+        Insert: {
+          created_at?: string
+          game_code: string
+          id?: never
+          message: string
+          player_id: string
+          player_name: string
+        }
+        Update: {
+          created_at?: string
+          game_code?: string
+          id?: never
+          message?: string
+          player_id?: string
+          player_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_events: {
         Row: {
           action: string
@@ -86,7 +121,7 @@ export type Database = {
           {
             foreignKeyName: "game_players_player_id_fkey"
             columns: ["player_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "players"
             referencedColumns: ["id"]
           },
@@ -153,8 +188,29 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "games_pending_action_target_id_fkey"
+            columns: ["pending_action_target_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "games_pending_blocker_id_fkey"
+            columns: ["pending_blocker_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "games_pending_target_id_fkey"
             columns: ["pending_target_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "games_winner_id_fkey"
+            columns: ["winner_id"]
             isOneToOne: false
             referencedRelation: "players"
             referencedColumns: ["id"]

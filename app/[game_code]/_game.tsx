@@ -41,13 +41,8 @@ import {
   SmallLabel,
   Wordmark,
 } from "@/components/ui";
+import Chat from "@/components/Chat";
 
-type ConnectionStatus =
-  | "CONNECTING"
-  | "SUBSCRIBED"
-  | "CHANNEL_ERROR"
-  | "TIMED_OUT"
-  | "CLOSED";
 
 type ConnectionLogEntry = { id: string; message: string; ts: number };
 type PresencePayload = { id: string; name: string };
@@ -138,9 +133,6 @@ export default function GameView() {
   const playerId = player.id;
   const playerName = player.name;
 
-  const [dbStatus, setDbStatus] = useState<ConnectionStatus>("CONNECTING");
-  const [presenceStatus, setPresenceStatus] =
-    useState<ConnectionStatus>("CONNECTING");
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [connectionLog, setConnectionLog] = useState<ConnectionLogEntry[]>([]);
@@ -206,7 +198,7 @@ export default function GameView() {
         { event: "INSERT", schema: "public", table: "game_events", filter: `game_code=eq.${gameCode}` },
         () => { void refreshLog(); },
       )
-      .subscribe((next) => { setDbStatus(next as ConnectionStatus); });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(dbChannel);
@@ -258,7 +250,6 @@ export default function GameView() {
         ]);
       })
       .subscribe(async (next) => {
-        setPresenceStatus(next as ConnectionStatus);
         if (next === "SUBSCRIBED")
           await presenceChannel.track({ id: playerId, name: playerName });
       });
@@ -332,11 +323,6 @@ export default function GameView() {
       <Frame>
         <main style={{ padding: 32 }}>
           <p style={{ color: M.muted }}>Connecting…</p>
-          <p style={{ color: M.muted, fontSize: 11, marginTop: 8 }}>
-            db <code style={{ color: connectionColor(dbStatus) }}>{shortStatus(dbStatus)}</code>
-            {" · "}
-            presence <code style={{ color: connectionColor(presenceStatus) }}>{shortStatus(presenceStatus)}</code>
-          </p>
         </main>
       </Frame>
     );
@@ -436,40 +422,32 @@ export default function GameView() {
         }}
       >
         <Wordmark size={18} sub={`Room · ${gameCode}`} />
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            fontSize: 11,
-            color: M.muted,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-          }}
-        >
-          <span>
-            db <code style={{ color: connectionColor(dbStatus) }}>{shortStatus(dbStatus)}</code>
-          </span>
-          <span style={{ opacity: 0.4 }}>·</span>
-          <span>
-            presence <code style={{ color: connectionColor(presenceStatus) }}>{shortStatus(presenceStatus)}</code>
-          </span>
-          <Pill size="sm" onClick={() => router.push("/")}>
-            Leave
-          </Pill>
-        </div>
+        <Pill size="sm" onClick={() => router.push("/")}>
+          Leave
+        </Pill>
       </header>
 
       <main
         style={{
-          maxWidth: 1100,
+          maxWidth: 1340,
           margin: "0 auto",
-          padding: "32px 24px 80px",
+          padding: "32px 24px 48px",
           display: "flex",
-          flexDirection: "column",
-          gap: 32,
+          gap: 24,
+          alignItems: "flex-start",
+          width: "100%",
         }}
       >
+        {/* Left: game content */}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 32,
+          }}
+        >
         {/* Opponents row */}
         {opponents.length > 0 && (
           <section
@@ -818,6 +796,20 @@ export default function GameView() {
             </ol>
           </section>
         )}
+        </div>
+
+        {/* Right: chat */}
+        <div
+          style={{
+            width: "clamp(220px, 22vw, 280px)",
+            flexShrink: 0,
+            height: "calc(100vh - 100px)",
+            position: "sticky",
+            top: 24,
+          }}
+        >
+          <Chat gameCode={gameCode} playerId={playerId} playerName={playerName} />
+        </div>
       </main>
     </Frame>
   );
@@ -1195,25 +1187,3 @@ function GameOverPanel({
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function shortStatus(s: ConnectionStatus): string {
-  switch (s) {
-    case "SUBSCRIBED":
-      return "ok";
-    case "CONNECTING":
-      return "…";
-    case "CHANNEL_ERROR":
-      return "err";
-    case "TIMED_OUT":
-      return "out";
-    case "CLOSED":
-      return "off";
-  }
-}
-
-function connectionColor(s: ConnectionStatus): string {
-  return s === "SUBSCRIBED"
-    ? M.good
-    : s === "CONNECTING"
-      ? M.muted
-      : M.blood;
-}
