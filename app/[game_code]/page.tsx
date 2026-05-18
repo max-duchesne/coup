@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { fetchGameState } from "@/lib/game";
 import LobbyView from "./_lobby";
 import GameView from "./_game";
+import { Frame, Wordmark } from "@/components/ui";
+import { M } from "@/lib/design";
 
 type View = "loading" | "lobby" | "game";
 
@@ -19,9 +21,14 @@ export default function GameCodePage() {
     if (!gameCode) return;
 
     // Determine initial view from DB state.
-    void fetchGameState(gameCode).then((state) => {
-      setView(state ? "game" : "lobby");
-    });
+    // Fall back to lobby on any error so the page never gets stuck.
+    void fetchGameState(gameCode)
+      .then((state) => {
+        setView(state ? "game" : "lobby");
+      })
+      .catch(() => {
+        setView("lobby");
+      });
 
     // Switch to game view the moment a game row is inserted (host starts the game).
     const channel = supabase
@@ -47,7 +54,19 @@ export default function GameCodePage() {
 
   if (view === "loading") {
     return (
-      <main style={{ padding: 24, fontFamily: "sans-serif" }}>Loading…</main>
+      <Frame>
+        <header
+          style={{
+            padding: "28px 48px",
+            borderBottom: `1px solid ${M.border}`,
+          }}
+        >
+          <Wordmark size={18} />
+        </header>
+        <main style={{ padding: 32, color: M.muted, fontSize: 14 }}>
+          Connecting…
+        </main>
+      </Frame>
     );
   }
 
