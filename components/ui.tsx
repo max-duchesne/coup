@@ -35,18 +35,18 @@ export function CoinPill({
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
-        padding: small ? "4px 9px" : "6px 12px",
+        gap: 7,
+        padding: small ? "5px 12px" : "7px 16px",
         borderRadius: 999,
         background: M.surface,
         border: `1px solid ${M.border}`,
-        fontSize: small ? 12 : 14,
+        fontSize: small ? 15 : 18,
         color: M.text,
         letterSpacing: "0.02em",
         fontWeight: 500,
       }}
     >
-      <Coin size={small ? 9 : 12} />
+      <Coin size={small ? 12 : 15} />
       {n}
     </span>
   );
@@ -258,8 +258,8 @@ export function Pill({
   type = "button",
   style,
 }: PillProps) {
-  const pad = size === "sm" ? "7px 14px" : "10px 18px";
-  const fs = size === "sm" ? 12 : 13;
+  const pad = size === "sm" ? "7px 14px" : "10px 20px";
+  const fs = size === "sm" ? 13 : 15;
   const accentColor = danger
     ? M.blood
     : accent === "gold"

@@ -140,6 +140,10 @@ export default function GameView() {
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [nextGamePending, setNextGamePending] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    label: string;
+    fn: () => Promise<void>;
+  } | null>(null);
 
   // Exchange selection: keys are "held-{influenceId}" or "drawn-{index}".
   const [exchangeSelection, setExchangeSelection] = useState<Set<string>>(
@@ -288,6 +292,17 @@ export default function GameView() {
     }
   };
 
+  const requestConfirm = (label: string, fn: () => Promise<void>) => {
+    setPendingConfirm({ label, fn });
+  };
+
+  const executeConfirm = async () => {
+    if (!pendingConfirm) return;
+    const { fn } = pendingConfirm;
+    setPendingConfirm(null);
+    await wrap(fn);
+  };
+
   const handlePlayAgain = async () => {
     setNextGamePending(true);
     try {
@@ -422,9 +437,6 @@ export default function GameView() {
         }}
       >
         <Wordmark size={18} sub={`Room · ${gameCode}`} />
-        <Pill size="sm" onClick={() => router.push("/")}>
-          Leave
-        </Pill>
       </header>
 
       <main
@@ -505,7 +517,14 @@ export default function GameView() {
             </p>
           )}
 
-          {status === "finished" ? (
+          {pendingConfirm ? (
+            <ConfirmPanel
+              label={pendingConfirm.label}
+              pending={actionPending}
+              onConfirm={() => void executeConfirm()}
+              onBack={() => setPendingConfirm(null)}
+            />
+          ) : status === "finished" ? (
             <GameOverPanel
               winner={winner}
               isMe={winner?.playerId === playerId}
@@ -529,8 +548,9 @@ export default function GameView() {
                       actionPending
                         ? undefined
                         : () =>
-                            void wrap(() =>
-                              loseInfluence(gameCode, playerId, inf.id),
+                            requestConfirm(
+                              `Reveal ${ROLE_LABELS[inf.role]}`,
+                              () => loseInfluence(gameCode, playerId, inf.id),
                             )
                     }
                     disabled={actionPending}
@@ -670,7 +690,11 @@ export default function GameView() {
                     <Pill
                       danger
                       disabled={actionPending}
-                      onClick={() => void wrap(() => submitChallenge(gameCode, playerId))}
+                      onClick={() =>
+                        requestConfirm("Challenge", () =>
+                          submitChallenge(gameCode, playerId),
+                        )
+                      }
                     >
                       Challenge
                     </Pill>
@@ -680,7 +704,11 @@ export default function GameView() {
                       key={role}
                       accent="gold"
                       disabled={actionPending}
-                      onClick={() => void wrap(() => submitBlock(gameCode, playerId, role))}
+                      onClick={() =>
+                        requestConfirm(`Block · ${ROLE_LABELS[role]}`, () =>
+                          submitBlock(gameCode, playerId, role),
+                        )
+                      }
                     >
                       Block · {ROLE_LABELS[role]}
                     </Pill>
@@ -709,7 +737,7 @@ export default function GameView() {
               gameCode={gameCode}
               playerId={playerId}
               opponents={aliveOpponents}
-              wrap={wrap}
+              onAction={requestConfirm}
             />
           ) : (
             <>
@@ -826,7 +854,7 @@ function ActionTray({
   gameCode,
   playerId,
   opponents,
-  wrap,
+  onAction,
 }: {
   mustCoup: boolean;
   actionPending: boolean;
@@ -836,7 +864,7 @@ function ActionTray({
   gameCode: string;
   playerId: string;
   opponents: GamePlayer[];
-  wrap: (fn: () => Promise<void>) => Promise<void>;
+  onAction: (label: string, fn: () => Promise<void>) => void;
 }) {
   return (
     <>
@@ -864,24 +892,24 @@ function ActionTray({
           label="Income"
           gain="+1"
           disabled={actionPending || mustCoup}
-          onClick={() => void wrap(() => takeIncome(gameCode, playerId))}
+          onClick={() => onAction("Income (+1)", () => takeIncome(gameCode, playerId))}
         />
         <ActionPill
           label="Foreign Aid"
           gain="+2"
           disabled={actionPending || mustCoup}
-          onClick={() => void wrap(() => takeForeignAid(gameCode, playerId))}
+          onClick={() => onAction("Foreign Aid (+2)", () => takeForeignAid(gameCode, playerId))}
         />
         <ActionPill
           label="Tax · Duke"
           gain="+3"
           disabled={actionPending || mustCoup}
-          onClick={() => void wrap(() => takeTax(gameCode, playerId))}
+          onClick={() => onAction("Tax (+3)", () => takeTax(gameCode, playerId))}
         />
         <ActionPill
           label="Exchange · Ambassador"
           disabled={actionPending || mustCoup}
-          onClick={() => void wrap(() => takeExchange(gameCode, playerId))}
+          onClick={() => onAction("Exchange", () => takeExchange(gameCode, playerId))}
         />
       </div>
 
@@ -924,11 +952,9 @@ function ActionTray({
               <ActionPill
                 label="Steal · Captain"
                 gain="+2"
-                disabled={
-                  actionPending || mustCoup || !canStealFrom(target)
-                }
+                disabled={actionPending || mustCoup || !canStealFrom(target)}
                 onClick={() =>
-                  void wrap(() =>
+                  onAction(`Steal from ${target.name}`, () =>
                     takeSteal(gameCode, playerId, target.playerId),
                   )
                 }
@@ -938,7 +964,7 @@ function ActionTray({
                 cost={3}
                 disabled={actionPending || mustCoup || !canAssassinate}
                 onClick={() =>
-                  void wrap(() =>
+                  onAction(`Assassinate ${target.name}`, () =>
                     takeAssassinate(gameCode, playerId, target.playerId),
                   )
                 }
@@ -949,7 +975,7 @@ function ActionTray({
                 cost={7}
                 disabled={actionPending || !canCoup}
                 onClick={() =>
-                  void wrap(() =>
+                  onAction(`Coup ${target.name}`, () =>
                     performCoup(gameCode, playerId, target.playerId),
                   )
                 }
@@ -1093,7 +1119,7 @@ function OpponentBlock({
           <div
             style={{
               fontFamily: FONT_DISPLAY,
-              fontSize: 13,
+              fontSize: 15,
               letterSpacing: "0.18em",
               color: active ? M.gold : eliminated ? M.muted : M.text,
               textTransform: "uppercase",
@@ -1108,20 +1134,20 @@ function OpponentBlock({
               gap: 6,
               marginTop: 2,
               color: eliminated ? M.muted : M.mutedHi,
-              fontSize: 12,
+              fontSize: 15,
             }}
           >
             {eliminated ? (
-              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 10 }}>
+              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 11 }}>
                 Out
               </span>
             ) : !online ? (
-              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 10 }}>
+              <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 11 }}>
                 Offline
               </span>
             ) : (
               <>
-                <Coin size={9} /> {p.coins}
+                <Coin size={12} /> {p.coins}
               </>
             )}
           </div>
@@ -1179,6 +1205,35 @@ function GameOverPanel({
         <Pill onClick={onQuit}>Quit</Pill>
         <Pill accent="gold" filled disabled={nextGamePending} onClick={onPlayAgain}>
           {nextGamePending ? "Starting…" : "Play again"}
+        </Pill>
+      </div>
+    </>
+  );
+}
+
+// ─── Confirm panel ──────────────────────────────────────────────────────────
+
+function ConfirmPanel({
+  label,
+  pending,
+  onConfirm,
+  onBack,
+}: {
+  label: string;
+  pending: boolean;
+  onConfirm: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <SmallLabel>Confirm</SmallLabel>
+      <DisplayHeading size={28}>{label}</DisplayHeading>
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <Pill onClick={onBack} disabled={pending}>
+          Go back
+        </Pill>
+        <Pill accent="gold" filled disabled={pending} onClick={onConfirm}>
+          {pending ? "…" : "Confirm"}
         </Pill>
       </div>
     </>

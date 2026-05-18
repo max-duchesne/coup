@@ -7,7 +7,6 @@ import { usePlayer } from "@/lib/player";
 import { startGame } from "@/lib/game";
 import {
   fetchLobbyPlayers,
-  removeLobbyPlayer,
   removeStaleSeats,
   setLobbyPlayerReady,
   upsertLobbyPlayer,
@@ -165,10 +164,6 @@ export default function LobbyView() {
     }
   };
 
-  const leaveLobby = async () => {
-    if (playerId) await removeLobbyPlayer(playerId).catch(() => {});
-    router.push("/");
-  };
 
   if (!playerId) {
     return (
@@ -213,9 +208,6 @@ export default function LobbyView() {
           <span style={{ fontSize: 12, color: M.muted, letterSpacing: "0.1em" }}>
             {gameCode}
           </span>
-          <Pill size="sm" onClick={() => void leaveLobby()}>
-            Leave
-          </Pill>
         </div>
       </header>
 
