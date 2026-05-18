@@ -20,6 +20,7 @@ export type Database = {
           created_at: string
           game_code: string
           id: number
+          metadata: Json | null
           player_id: string
         }
         Insert: {
@@ -27,6 +28,7 @@ export type Database = {
           created_at?: string
           game_code: string
           id?: never
+          metadata?: Json | null
           player_id: string
         }
         Update: {
@@ -34,6 +36,7 @@ export type Database = {
           created_at?: string
           game_code?: string
           id?: never
+          metadata?: Json | null
           player_id?: string
         }
         Relationships: [
@@ -94,24 +97,79 @@ export type Database = {
           created_at: string
           current_turn_player_id: string
           game_code: string
+          pending_target_id: string | null
           status: string
+          turn_phase: string
         }
         Insert: {
           created_at?: string
           current_turn_player_id: string
           game_code: string
+          pending_target_id?: string | null
           status?: string
+          turn_phase?: string
         }
         Update: {
           created_at?: string
           current_turn_player_id?: string
           game_code?: string
+          pending_target_id?: string | null
           status?: string
+          turn_phase?: string
         }
         Relationships: [
           {
             foreignKeyName: "games_current_turn_player_id_fkey"
             columns: ["current_turn_player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "games_pending_target_id_fkey"
+            columns: ["pending_target_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      player_influences: {
+        Row: {
+          game_code: string
+          id: number
+          is_revealed: boolean
+          player_id: string
+          position: number
+          role: string
+        }
+        Insert: {
+          game_code: string
+          id?: never
+          is_revealed?: boolean
+          player_id: string
+          position: number
+          role: string
+        }
+        Update: {
+          game_code?: string
+          id?: never
+          is_revealed?: boolean
+          player_id?: string
+          position?: number
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_influences_game_code_fkey"
+            columns: ["game_code"]
+            isOneToOne: false
+            referencedRelation: "games"
+            referencedColumns: ["game_code"]
+          },
+          {
+            foreignKeyName: "player_influences_player_id_fkey"
+            columns: ["player_id"]
             isOneToOne: false
             referencedRelation: "players"
             referencedColumns: ["id"]
