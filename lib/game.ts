@@ -49,8 +49,34 @@ export type GamePlayer = {
   name: string;
   coins: number;
   seatOrder: number;
+  /**
+   * Count of revealed (face-up) influences. Maintained on `game_players` so
+   * every client can determine who's still alive without being able to read
+   * opponents' hidden cards (RLS hides unrevealed cards from non-owners).
+   * Use `isAlive(p)` rather than reading this directly.
+   */
+  revealedCount: number;
   influences: Influence[];
 };
+
+/**
+ * Every player starts with this many face-down influences. Used together
+ * with `revealedCount` to determine aliveness in a way that doesn't depend
+ * on the caller being able to see the opponent's actual cards.
+ */
+const STARTING_INFLUENCES = 2;
+
+/**
+ * Whether a player still has at least one face-down influence.
+ *
+ * Implemented in terms of `revealedCount` (visible to every game
+ * participant via `game_players` RLS) instead of `influences.some(i => !i.isRevealed)`,
+ * because the latter only works when the caller can read the opponent's
+ * unrevealed cards — which RLS prevents.
+ */
+export function isAlive(p: Pick<GamePlayer, "revealedCount">): boolean {
+  return p.revealedCount < STARTING_INFLUENCES;
+}
 
 /**
  * The kinds of actions that go through the awaiting_challenge phase. Every
@@ -137,10 +163,6 @@ export type GameEvent = {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ROLES: Role[] = ["duke", "assassin", "captain", "ambassador", "contessa"];
-const DECK: Role[] = ROLES.flatMap((r) => [r, r, r]);
-const COPIES_PER_ROLE = 3;
-
 /**
  * The role that an action's actor claims. `null` for actions without a role
  * claim (foreign_aid → no Challenge button, only Block).
@@ -163,15 +185,6 @@ export const BLOCK_ROLES: Record<PendingAction, Role[]> = {
   assassinate: ["contessa"],
   exchange: [],
 };
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j] as T, a[i] as T];
-  }
-  return a;
-}
 
 // ─── Game setup ──────────────────────────────────────────────────────────────
 
@@ -202,26 +215,10 @@ export async function startGame(
   );
   if (playersError) throw playersError;
 
-  const deck = shuffle(DECK);
-  const { error: influencesError } = await supabase
-    .from("player_influences")
-    .insert(
-      playerIds.flatMap((playerId, playerIndex) => [
-        {
-          game_code: gameCode,
-          player_id: playerId,
-          role: deck[playerIndex * 2],
-          position: 0,
-        },
-        {
-          game_code: gameCode,
-          player_id: playerId,
-          role: deck[playerIndex * 2 + 1],
-          position: 1,
-        },
-      ]),
-    );
-  if (influencesError) throw influencesError;
+  const { error: dealError } = await supabase.rpc("deal_initial_influences", {
+    p_game_code: gameCode,
+  });
+  if (dealError) throw dealError;
 }
 
 // ─── Non-challengeable, non-blockable actions ───────────────────────────────
@@ -359,8 +356,7 @@ export async function passChallenge(
 
   const me = state.players.find((p) => p.playerId === playerId);
   if (!me) throw new Error("Player not in game");
-  if (!me.influences.some((i) => !i.isRevealed))
-    throw new Error("Eliminated players cannot pass");
+  if (!isAlive(me)) throw new Error("Eliminated players cannot pass");
 
   // The "owner" of the current claim cannot pass on their own claim.
   // - In action phase: the actor.
@@ -386,9 +382,7 @@ export async function passChallenge(
   const refreshedClaimOwnerId =
     refreshed.pendingBlockerId ?? refreshed.currentTurnPlayerId;
   const aliveResponders = refreshed.players.filter(
-    (p) =>
-      p.playerId !== refreshedClaimOwnerId &&
-      p.influences.some((i) => !i.isRevealed),
+    (p) => p.playerId !== refreshedClaimOwnerId && isAlive(p),
   );
   const allPassed = aliveResponders.every((p) =>
     refreshed.challengePasses.includes(p.playerId),
@@ -401,141 +395,21 @@ export async function passChallenge(
     await _completeAction(refreshed.gameCode, refreshed);
   } else {
     // No block, no challenge → original action resolves.
-    await _resolvePendingAction(refreshed, { swapClaimed: false });
+    await _resolvePendingAction(refreshed);
   }
 }
 
 /**
  * Challenge the pending action or pending block.
- * - In action phase: challenges the actor's role claim.
- * - In block phase: challenges the blocker's role claim.
- *
- * First-clicker wins via an atomic guard on `turn_phase` plus the matching
- * blocker-id condition.
+ * Resolved server-side via `resolve_challenge` so the claimant's hidden
+ * cards are read with definer privileges; the challenger is always
+ * `auth.uid()` inside the RPC.
  */
-export async function submitChallenge(
-  gameCode: string,
-  challengerId: string,
-): Promise<void> {
-  const state = await fetchGameState(gameCode);
-  if (!state) throw new Error("Game not found");
-  if (state.turnPhase !== "awaiting_challenge")
-    throw new Error("Nothing to challenge right now");
-
-  const challenger = state.players.find((p) => p.playerId === challengerId);
-  if (!challenger) throw new Error("Player not in game");
-  if (!challenger.influences.some((i) => !i.isRevealed))
-    throw new Error("Eliminated players cannot challenge");
-
-  // Block-challenge phase
-  if (state.pendingBlockerId !== null) {
-    if (state.pendingBlockerId === challengerId)
-      throw new Error("The blocker cannot challenge their own block");
-
-    const blocker = state.players.find(
-      (p) => p.playerId === state.pendingBlockerId,
-    );
-    if (!blocker) throw new Error("Blocker not in game");
-    const blockRole = state.pendingBlockRole;
-    if (!blockRole) throw new Error("No block role on record");
-
-    const blockerHasRole = blocker.influences.some(
-      (i) => !i.isRevealed && i.role === blockRole,
-    );
-
-    const update = blockerHasRole
-      ? {
-          turn_phase: "lose_influence" as const,
-          pending_target_id: challengerId,
-          lose_influence_reason: "failed_block_challenge_challenger" as const,
-        }
-      : {
-          turn_phase: "lose_influence" as const,
-          pending_target_id: blocker.playerId,
-          lose_influence_reason: "failed_block_challenge_blocker" as const,
-        };
-
-    const { data, error } = await supabase
-      .from("games")
-      .update(update)
-      .eq("game_code", gameCode)
-      .eq("turn_phase", "awaiting_challenge")
-      .not("pending_blocker_id", "is", null)
-      .select();
-    if (error) throw error;
-    if (!data || data.length === 0)
-      throw new Error("Challenge no longer available");
-
-    const { error: eventError } = await supabase.from("game_events").insert({
-      game_code: gameCode,
-      player_id: challengerId,
-      action: "challenge",
-      metadata: {
-        targetPlayerId: blocker.playerId,
-        targetName: blocker.name,
-        role: blockRole,
-        action: state.pendingAction ?? undefined,
-        success: !blockerHasRole,
-        isBlock: true,
-      },
-    });
-    if (eventError) throw eventError;
-    return;
-  }
-
-  // Action-challenge phase
-  if (state.currentTurnPlayerId === challengerId)
-    throw new Error("The acting player cannot challenge");
-
-  const actor = state.players.find(
-    (p) => p.playerId === state.currentTurnPlayerId,
-  );
-  if (!actor) throw new Error("Actor not in game");
-  if (!state.pendingAction) throw new Error("No pending action");
-
-  const claimedRole = ACTION_CLAIMED_ROLE[state.pendingAction];
-  if (!claimedRole) throw new Error("This action cannot be challenged");
-
-  const actorHasClaim = actor.influences.some(
-    (i) => !i.isRevealed && i.role === claimedRole,
-  );
-
-  const update = actorHasClaim
-    ? {
-        turn_phase: "lose_influence" as const,
-        pending_target_id: challengerId,
-        lose_influence_reason: "failed_challenge_challenger" as const,
-      }
-    : {
-        turn_phase: "lose_influence" as const,
-        pending_target_id: actor.playerId,
-        lose_influence_reason: "failed_challenge_actor" as const,
-      };
-
-  const { data: claimed, error: claimError } = await supabase
-    .from("games")
-    .update(update)
-    .eq("game_code", gameCode)
-    .eq("turn_phase", "awaiting_challenge")
-    .is("pending_blocker_id", null)
-    .select();
-  if (claimError) throw claimError;
-  if (!claimed || claimed.length === 0)
-    throw new Error("Challenge no longer available");
-
-  const { error: eventError } = await supabase.from("game_events").insert({
-    game_code: gameCode,
-    player_id: challengerId,
-    action: "challenge",
-    metadata: {
-      targetPlayerId: actor.playerId,
-      targetName: actor.name,
-      role: claimedRole,
-      action: state.pendingAction,
-      success: !actorHasClaim,
-    },
+export async function submitChallenge(gameCode: string): Promise<void> {
+  const { error } = await supabase.rpc("resolve_challenge", {
+    p_game_code: gameCode,
   });
-  if (eventError) throw eventError;
+  if (error) throw error;
 }
 
 /**
@@ -560,8 +434,7 @@ export async function submitBlock(
 
   const blocker = state.players.find((p) => p.playerId === blockerId);
   if (!blocker) throw new Error("Player not in game");
-  if (!blocker.influences.some((i) => !i.isRevealed))
-    throw new Error("Eliminated players cannot block");
+  if (!isAlive(blocker)) throw new Error("Eliminated players cannot block");
 
   const allowedRoles = BLOCK_ROLES[state.pendingAction];
   if (!allowedRoles.includes(blockRole))
@@ -660,17 +533,9 @@ export async function performCoup(
 // ─── Lose influence (single entry point for all reveal-a-card flows) ────────
 
 /**
- * Resolve a `lose_influence` phase. Behavior depends on `loseInfluenceReason`:
- *  - failed_challenge_challenger:
- *      challenger lost. Actor swaps the claimed card and the action resolves.
- *  - failed_block_challenge_challenger:
- *      challenger of block lost. Blocker swaps the block-role card; the
- *      block stands and the original action does NOT resolve.
- *  - failed_block_challenge_blocker:
- *      blocker lost. Block fails and the original action resolves (no swap;
- *      the actor was never challenged).
- *  - coup / assassinate / failed_challenge_actor / null (legacy):
- *      just lose the card and advance the turn.
+ * Resolve a `lose_influence` phase (reveal, optional swap, phase advance).
+ * All state transitions run in `lose_influence_and_resolve` so reveal and
+ * swap cannot be split across client round-trips.
  */
 export async function loseInfluence(
   gameCode: string,
@@ -690,100 +555,11 @@ export async function loseInfluence(
   );
   if (!influence) throw new Error("Invalid influence selection");
 
-  const { error: revealError } = await supabase
-    .from("player_influences")
-    .update({ is_revealed: true })
-    .eq("id", influenceId);
-  if (revealError) throw revealError;
-
-  const { error: loseEventError } = await supabase
-    .from("game_events")
-    .insert({
-      game_code: gameCode,
-      player_id: playerId,
-      action: "lose_influence",
-      metadata: { role: influence.role },
-    });
-  if (loseEventError) throw loseEventError;
-
-  const updatedInfluences = (self?.influences ?? []).map((i) =>
-    i.id === influenceId ? { ...i, isRevealed: true } : i,
-  );
-  const isEliminated = updatedInfluences.every((i) => i.isRevealed);
-
-  if (isEliminated) {
-    const { error: elimEventError } = await supabase
-      .from("game_events")
-      .insert({ game_code: gameCode, player_id: playerId, action: "eliminated" });
-    if (elimEventError) throw elimEventError;
-  }
-
-  const updatedPlayers = state.players.map((p) =>
-    p.playerId === playerId ? { ...p, influences: updatedInfluences } : p,
-  );
-  const alivePlayers = updatedPlayers.filter((p) =>
-    p.influences.some((i) => !i.isRevealed),
-  );
-
-  if (alivePlayers.length === 1) {
-    const winner = alivePlayers[0];
-    const { error: winEventError } = await supabase.from("game_events").insert({
-      game_code: gameCode,
-      player_id: winner.playerId,
-      action: "win",
-    });
-    if (winEventError) throw winEventError;
-
-    const { error: finishError } = await supabase
-      .from("games")
-      .update({
-        turn_phase: "action",
-        pending_target_id: null,
-        pending_action: null,
-        pending_action_target_id: null,
-        pending_blocker_id: null,
-        pending_block_role: null,
-        lose_influence_reason: null,
-        challenge_passes: [],
-        status: "finished",
-        winner_id: winner.playerId,
-      })
-      .eq("game_code", gameCode);
-    if (finishError) throw finishError;
-    return;
-  }
-
-  const updatedState: GameState = { ...state, players: updatedPlayers };
-  const reason = state.loseInfluenceReason;
-
-  if (reason === "failed_challenge_challenger") {
-    // Actor's claim was real. Swap the actor's card; action resolves.
-    await _resolvePendingAction(updatedState, { swapClaimed: true });
-    return;
-  }
-
-  if (reason === "failed_block_challenge_blocker") {
-    // Blocker bluffed and lost; the action resolves. The actor was never
-    // challenged, so no swap for them.
-    await _resolvePendingAction(updatedState, { swapClaimed: false });
-    return;
-  }
-
-  if (reason === "failed_block_challenge_challenger") {
-    // Block was real. Swap the blocker's card; action does NOT resolve.
-    if (updatedState.pendingBlockerId && updatedState.pendingBlockRole) {
-      await _swapClaimedCard(
-        updatedState,
-        updatedState.pendingBlockerId,
-        updatedState.pendingBlockRole,
-      );
-    }
-    await _completeAction(gameCode, updatedState);
-    return;
-  }
-
-  // coup / assassinate / failed_challenge_actor / null
-  await _completeAction(gameCode, updatedState);
+  const { error } = await supabase.rpc("lose_influence_and_resolve", {
+    p_game_code: gameCode,
+    p_influence_id: influenceId,
+  });
+  if (error) throw error;
 }
 
 // ─── Ambassador exchange resolution ─────────────────────────────────────────
@@ -887,7 +663,7 @@ export function eligibleBlockRoles(
   if (!state.pendingAction) return [];
 
   const me = state.players.find((p) => p.playerId === playerId);
-  if (!me || !me.influences.some((i) => !i.isRevealed)) return [];
+  if (!me || !isAlive(me)) return [];
 
   const allowed = BLOCK_ROLES[state.pendingAction];
   if (allowed.length === 0) return [];
@@ -905,6 +681,7 @@ type GamePlayersJoinRow = {
   player_id: string;
   coins: number;
   seat_order: number;
+  revealed_count: number;
   players: { name: string } | null;
 };
 
@@ -939,7 +716,7 @@ export async function fetchGameState(
   ] = await Promise.all([
     supabase
       .from("game_players")
-      .select("player_id, coins, seat_order, players(name)")
+      .select("player_id, coins, seat_order, revealed_count, players(name)")
       .eq("game_code", gameCode)
       .order("seat_order", { ascending: true }),
     supabase
@@ -972,6 +749,7 @@ export async function fetchGameState(
     name: row.players?.name ?? "(unknown)",
     coins: row.coins,
     seatOrder: row.seat_order,
+    revealedCount: row.revealed_count,
     influences: influencesByPlayer.get(row.player_id) ?? [],
   }));
 
@@ -1036,7 +814,7 @@ function nextAliveTurnOrder(
   for (let i = 1; i <= n; i++) {
     const nextSeat = (currentSeat + i) % n;
     const candidate = state.players.find((p) => p.seatOrder === nextSeat);
-    if (candidate?.influences.some((inf) => !inf.isRevealed)) {
+    if (candidate && isAlive(candidate)) {
       return candidate.playerId;
     }
   }
@@ -1101,10 +879,7 @@ async function _completeAction(
 
 // ─── Internal: apply a pending action's effect ──────────────────────────────
 
-async function _resolvePendingAction(
-  state: GameState,
-  opts: { swapClaimed: boolean },
-): Promise<void> {
+async function _resolvePendingAction(state: GameState): Promise<void> {
   const action = state.pendingAction;
   if (!action) throw new Error("No pending action to resolve");
 
@@ -1112,13 +887,6 @@ async function _resolvePendingAction(
     (p) => p.playerId === state.currentTurnPlayerId,
   );
   if (!actor) throw new Error("Actor not in game");
-
-  if (opts.swapClaimed) {
-    const claimedRole = ACTION_CLAIMED_ROLE[action];
-    if (claimedRole) {
-      await _swapClaimedCard(state, actor.playerId, claimedRole);
-    }
-  }
 
   switch (action) {
     case "foreign_aid": {
@@ -1193,20 +961,9 @@ async function _resolvePendingAction(
       return;
     }
     case "exchange": {
-      const drawn = _drawTwoFromDeck(state);
-      const { error } = await supabase
-        .from("games")
-        .update({
-          turn_phase: "ambassador_exchange",
-          pending_ambassador_draw: drawn,
-          pending_action: null,
-          pending_action_target_id: null,
-          pending_blocker_id: null,
-          pending_block_role: null,
-          lose_influence_reason: null,
-          challenge_passes: [],
-        })
-        .eq("game_code", state.gameCode);
+      const { error } = await supabase.rpc("draw_ambassador_cards", {
+        p_game_code: state.gameCode,
+      });
       if (error) throw error;
       return;
     }
@@ -1216,7 +973,7 @@ async function _resolvePendingAction(
       );
       if (!target) throw new Error("Target player not in game");
 
-      const targetAlive = target.influences.some((i) => !i.isRevealed);
+      const targetAlive = isAlive(target);
 
       await supabase.from("game_events").insert({
         game_code: state.gameCode,
@@ -1249,53 +1006,4 @@ async function _resolvePendingAction(
       return;
     }
   }
-}
-
-// ─── Internal: deck math ────────────────────────────────────────────────────
-
-function _computeDeck(state: GameState): Role[] {
-  const counts: Record<Role, number> = {
-    duke: COPIES_PER_ROLE,
-    assassin: COPIES_PER_ROLE,
-    captain: COPIES_PER_ROLE,
-    ambassador: COPIES_PER_ROLE,
-    contessa: COPIES_PER_ROLE,
-  };
-  for (const p of state.players) {
-    for (const inf of p.influences) {
-      counts[inf.role]--;
-    }
-  }
-  const deck: Role[] = [];
-  for (const r of ROLES) {
-    for (let i = 0; i < counts[r]; i++) deck.push(r);
-  }
-  return deck;
-}
-
-function _drawTwoFromDeck(state: GameState): Role[] {
-  const deck = shuffle(_computeDeck(state));
-  return deck.slice(0, 2);
-}
-
-async function _swapClaimedCard(
-  state: GameState,
-  ownerId: string,
-  role: Role,
-): Promise<void> {
-  const owner = state.players.find((p) => p.playerId === ownerId);
-  if (!owner) throw new Error("Card owner not in game");
-  const card = owner.influences.find((i) => !i.isRevealed && i.role === role);
-  if (!card) throw new Error("Owner has no live card matching the claim");
-
-  const deck = _computeDeck(state);
-  // The card going back to the deck:
-  deck.push(role);
-  const newRole = deck[Math.floor(Math.random() * deck.length)] as Role;
-
-  const { error } = await supabase
-    .from("player_influences")
-    .update({ role: newRole })
-    .eq("id", card.id);
-  if (error) throw error;
 }

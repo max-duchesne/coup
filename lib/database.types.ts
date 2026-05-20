@@ -96,18 +96,21 @@ export type Database = {
           coins: number
           game_code: string
           player_id: string
+          revealed_count: number
           seat_order: number
         }
         Insert: {
           coins?: number
           game_code: string
           player_id: string
+          revealed_count?: number
           seat_order: number
         }
         Update: {
           coins?: number
           game_code?: string
           player_id?: string
+          revealed_count?: number
           seat_order?: number
         }
         Relationships: [
@@ -288,7 +291,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      deal_initial_influences: {
+        Args: { p_game_code: string }
+        Returns: undefined
+      }
+      draw_ambassador_cards: {
+        Args: { p_game_code: string }
+        Returns: string[]
+      }
+      lose_influence_and_resolve: {
+        Args: { p_game_code: string; p_influence_id: number }
+        Returns: undefined
+      }
+      resolve_challenge: { Args: { p_game_code: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never

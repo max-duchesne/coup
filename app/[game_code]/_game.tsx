@@ -9,6 +9,7 @@ import {
   eligibleBlockRoles,
   fetchGameLog,
   fetchGameState,
+  isAlive,
   loseInfluence,
   passChallenge,
   performCoup,
@@ -374,10 +375,8 @@ export default function GameView() {
   const canAssassinate = (me?.coins ?? 0) >= 3;
   const canStealFrom = (p: { coins: number }) => p.coins > 0;
   const myLiveInfluences = (me?.influences ?? []).filter((i) => !i.isRevealed);
-  const iAmEliminated = myLiveInfluences.length === 0;
-  const aliveOpponents = opponents.filter((p) =>
-    p.influences.some((i) => !i.isRevealed),
-  );
+  const iAmEliminated = me ? !isAlive(me) : false;
+  const aliveOpponents = opponents.filter((p) => isAlive(p));
 
   const iAlreadyPassed = challengePasses.includes(playerId);
   const inBlockChallenge =
@@ -693,7 +692,7 @@ export default function GameView() {
                       disabled={actionPending}
                       onClick={() =>
                         requestConfirm("Challenge", () =>
-                          submitChallenge(gameCode, playerId),
+                          submitChallenge(gameCode),
                         )
                       }
                     >
@@ -1045,7 +1044,7 @@ function OpponentBlock({
   isPendingTarget: boolean;
   isBlocker: boolean;
 }) {
-  const eliminated = p.influences.every((i) => i.isRevealed);
+  const eliminated = !isAlive(p);
 
   return (
     <div
