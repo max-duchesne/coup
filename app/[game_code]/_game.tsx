@@ -153,6 +153,7 @@ export default function GameView() {
   );
 
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoLoseInfluenceRef = useRef(false);
 
   const showError = (msg: string) => {
     setActionError(msg);
@@ -293,6 +294,36 @@ export default function GameView() {
       setActionPending(false);
     }
   };
+
+  // Last influence is automatic — no choice when only one card remains.
+  useEffect(() => {
+    if (!gameState || !playerId || !gameCode) return;
+
+    const { turnPhase, pendingTargetId } = gameState;
+    if (turnPhase !== "lose_influence" || pendingTargetId !== playerId) {
+      autoLoseInfluenceRef.current = false;
+      return;
+    }
+
+    const me = gameState.players.find((p) => p.playerId === playerId);
+    const live = (me?.influences ?? []).filter((i) => !i.isRevealed);
+    if (live.length !== 1 || autoLoseInfluenceRef.current || actionPending) return;
+
+    autoLoseInfluenceRef.current = true;
+    const influenceId = live[0].id;
+
+    void (async () => {
+      setActionPending(true);
+      try {
+        await loseInfluence(gameCode, playerId, influenceId);
+      } catch (err) {
+        autoLoseInfluenceRef.current = false;
+        showError(err instanceof Error ? err.message : "Action failed");
+      } finally {
+        setActionPending(false);
+      }
+    })();
+  }, [gameState, playerId, gameCode, actionPending]);
 
   const requestConfirm = (label: string, fn: () => Promise<void>) => {
     setPendingConfirm({ label, fn });
@@ -532,7 +563,7 @@ export default function GameView() {
               onPlayAgain={() => void handlePlayAgain()}
               nextGamePending={nextGamePending}
             />
-          ) : iMustLoseInfluence ? (
+          ) : iMustLoseInfluence && myLiveInfluences.length > 1 ? (
             <>
               <SmallLabel color={M.blood}>Lose an influence</SmallLabel>
               <DisplayHeading size={32}>
@@ -557,6 +588,15 @@ export default function GameView() {
                   />
                 ))}
               </div>
+            </>
+          ) : iMustLoseInfluence ? (
+            <>
+              <SmallLabel color={M.blood}>Lose an influence</SmallLabel>
+              <DisplayHeading size={32}>
+                {actionPending
+                  ? "Revealing your last card…"
+                  : "Revealing your last card."}
+              </DisplayHeading>
             </>
           ) : turnPhase === "lose_influence" ? (
             <>
