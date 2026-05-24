@@ -6,6 +6,7 @@ export type LobbyPlayer = {
   name: string;
   is_ready: boolean;
   joined_at: string;
+  desiredSeatOrder: number | null;
 };
 
 export async function fetchLobbyPlayers(
@@ -13,12 +14,16 @@ export async function fetchLobbyPlayers(
 ): Promise<LobbyPlayer[]> {
   const { data, error } = await supabase
     .from("players")
-    .select("id, game_code, name, is_ready, joined_at")
+    .select("id, game_code, name, is_ready, joined_at, desired_seat_order")
     .eq("game_code", gameCode)
+    .order("desired_seat_order", { ascending: true, nullsFirst: false })
     .order("joined_at", { ascending: true });
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map((row) => ({
+    ...row,
+    desiredSeatOrder: row.desired_seat_order ?? null,
+  }));
 }
 
 /**

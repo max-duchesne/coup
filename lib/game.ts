@@ -19,6 +19,7 @@ export type GameStatus = "in_progress" | "finished";
 export type TurnPhase =
   | "action"
   | "awaiting_challenge"
+  | "awaiting_reveal"
   | "lose_influence"
   | "ambassador_exchange";
 
@@ -134,6 +135,7 @@ export type GameState = {
   pendingActionTargetId: string | null;
   pendingBlockerId: string | null;
   pendingBlockRole: Role | null;
+  pendingChallengerId: string | null;
   loseInfluenceReason: LoseInfluenceReason | null;
   challengePasses: string[];
   pendingAmbassadorDraw: Role[] | null;
@@ -227,8 +229,9 @@ function shuffle<T>(items: readonly T[]): T[] {
 export async function startGame(
   gameCode: string,
   playerIds: string[],
+  randomizeTurnOrder = true,
 ): Promise<void> {
-  const turnOrder = shuffle(playerIds);
+  const turnOrder = randomizeTurnOrder ? shuffle(playerIds) : [...playerIds];
 
   // Preserve lobby settings written by the host before the game starts.
   const { data: existingGame } = await supabase
@@ -279,6 +282,7 @@ export async function updateLobbySettings(
   hostId: string,
   cardsPerPlayer: number,
   roleCounts: Record<Role, number>,
+  randomizeTurnOrder = true,
 ): Promise<void> {
   const { error } = await supabase.from("games").upsert(
     {
@@ -287,6 +291,7 @@ export async function updateLobbySettings(
       status: "lobby",
       cards_per_player: cardsPerPlayer,
       role_counts: roleCounts,
+      randomize_turn_order: randomizeTurnOrder,
     },
     { onConflict: "game_code" },
   );
@@ -475,14 +480,29 @@ export async function passChallenge(
 }
 
 /**
- * Challenge the pending action or pending block.
- * Resolved server-side via `resolve_challenge` so the claimant's hidden
- * cards are read with definer privileges; the challenger is always
- * `auth.uid()` inside the RPC.
+ * Challenge the pending action or block.
+ * Moves the game to awaiting_reveal so the claimant can choose to reveal
+ * or back down (server-side via submit_challenge RPC).
  */
 export async function submitChallenge(gameCode: string): Promise<void> {
-  const { error } = await supabase.rpc("resolve_challenge", {
+  const { error } = await supabase.rpc("submit_challenge", {
     p_game_code: gameCode,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Challenged player's response during awaiting_reveal phase.
+ * reveal=true  → prove they hold the card; the challenger will lose influence.
+ * reveal=false → back down; the claimant loses influence and the action fails.
+ */
+export async function revealOrBackDown(
+  gameCode: string,
+  reveal: boolean,
+): Promise<void> {
+  const { error } = await supabase.rpc("reveal_or_back_down", {
+    p_game_code: gameCode,
+    p_reveal: reveal,
   });
   if (error) throw error;
 }
@@ -701,6 +721,18 @@ export async function resolveExchange(
   if (eventError) throw eventError;
 }
 
+/** Persist a host-defined seat order for the lobby (drag-and-drop). */
+export async function setLobbyPlayerOrder(
+  gameCode: string,
+  orderedIds: string[],
+): Promise<void> {
+  const { error } = await supabase.rpc("set_lobby_player_order", {
+    p_game_code: gameCode,
+    p_ordered_ids: orderedIds,
+  });
+  if (error) throw error;
+}
+
 // ─── Next game ───────────────────────────────────────────────────────────────
 
 export async function startNextGame(
@@ -775,7 +807,7 @@ export async function fetchGameState(
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_action, pending_action_target_id, pending_blocker_id, pending_block_role, lose_influence_reason, challenge_passes, pending_ambassador_draw, winner_id, next_game_code, cards_per_player, role_counts",
+      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_action, pending_action_target_id, pending_blocker_id, pending_block_role, pending_challenger_id, lose_influence_reason, challenge_passes, pending_ambassador_draw, winner_id, next_game_code, cards_per_player, role_counts",
     )
     .eq("game_code", gameCode)
     .in("status", ["in_progress", "finished"])
@@ -840,6 +872,7 @@ export async function fetchGameState(
     pendingActionTargetId: game.pending_action_target_id,
     pendingBlockerId: game.pending_blocker_id,
     pendingBlockRole: (game.pending_block_role as Role | null) ?? null,
+    pendingChallengerId: game.pending_challenger_id ?? null,
     loseInfluenceReason:
       (game.lose_influence_reason as LoseInfluenceReason | null) ?? null,
     challengePasses: game.challenge_passes ?? [],
