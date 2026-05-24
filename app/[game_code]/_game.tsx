@@ -1219,7 +1219,7 @@ function OpponentBlock({
               </span>
             ) : !online ? (
               <span style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontSize: 13 }}>
-                Offline
+                Disconnected
               </span>
             ) : (
               <>
