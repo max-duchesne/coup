@@ -16,6 +16,7 @@ import {
   passChallenge,
   performCoup,
   resolveExchange,
+  revealOrBackDown,
   startNextGame,
   submitBlock,
   submitChallenge,
@@ -103,11 +104,8 @@ function formatLogEntry(event: GameEvent): string {
         ? (ROLE_LABELS[event.metadata.role as Role] ?? event.metadata.role)
         : "the claim";
       const isBlock = event.metadata?.isBlock === true;
-      const success = event.metadata?.success === true;
       const claimDescriptor = isBlock ? `${role} block` : `${role} claim`;
-      return success
-        ? `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — bluff exposed.`
-        : `${n} challenged ${t ?? "someone"}'s ${claimDescriptor} — ${t ?? "they"} had it.`;
+      return `${n} challenged ${t ?? "someone"}'s ${claimDescriptor}.`;
     }
     case "block": {
       const role = event.metadata?.role
@@ -431,6 +429,7 @@ export default function GameView() {
     pendingActionTargetId,
     pendingBlockerId,
     pendingBlockRole,
+    pendingChallengerId,
     challengePasses,
     pendingAmbassadorDraw,
     players,
@@ -455,6 +454,23 @@ export default function GameView() {
   const aliveOpponents = opponents.filter((p) =>
     isAlive(p, gameState.cardsPerPlayer),
   );
+
+  // awaiting_reveal derived state
+  const inAwaitingReveal = turnPhase === "awaiting_reveal";
+  const revealClaimantId = pendingBlockerId ?? currentTurnPlayerId;
+  const iAmBeingChallenged = inAwaitingReveal && playerId === revealClaimantId;
+  const revealClaimedRole = pendingBlockerId
+    ? pendingBlockRole
+    : pendingAction
+      ? ACTION_CLAIMED_ROLE[pendingAction]
+      : null;
+  const iHaveClaimedCard =
+    revealClaimedRole !== null &&
+    myLiveInfluences.some((i) => i.role === revealClaimedRole);
+  const challengerPlayer = pendingChallengerId
+    ? players.find((p) => p.playerId === pendingChallengerId)
+    : null;
+  const revealClaimantPlayer = players.find((p) => p.playerId === revealClaimantId);
 
   const iAlreadyPassed = challengePasses.includes(playerId);
   const inBlockChallenge =
@@ -720,6 +736,55 @@ export default function GameView() {
                 {currentTurnPlayer?.name ?? "A player"} is exchanging.
               </DisplayHeading>
             </>
+          ) : inAwaitingReveal ? (
+            iAmBeingChallenged ? (
+              <>
+                <SmallLabel color={M.blood}>
+                  Challenged by {challengerPlayer?.name ?? "opponent"}
+                </SmallLabel>
+                <DisplayHeading size={isMobile ? 24 : 30}>
+                  Reveal your {revealClaimedRole ? ROLE_LABELS[revealClaimedRole] : "card"}?
+                </DisplayHeading>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    width: "100%",
+                    marginTop: 4,
+                  }}
+                >
+                  <Pill
+                    accent="gold"
+                    filled
+                    disabled={actionPending || !iHaveClaimedCard}
+                    onClick={() => void wrap(() => revealOrBackDown(gameCode, true))}
+                    style={!iHaveClaimedCard ? { cursor: "not-allowed" } : undefined}
+                  >
+                    Reveal {revealClaimedRole ? ROLE_LABELS[revealClaimedRole] : "card"}
+                  </Pill>
+                  <Pill
+                    disabled={actionPending}
+                    onClick={() => void wrap(() => revealOrBackDown(gameCode, false))}
+                  >
+                    Don&apos;t reveal
+                  </Pill>
+                </div>
+                {!iHaveClaimedCard && (
+                  <p style={{ color: M.muted, fontSize: 14, margin: 0 }}>
+                    You don&apos;t have {revealClaimedRole ? ROLE_LABELS[revealClaimedRole] : "this card"} — you must back down.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <SmallLabel>Challenge in progress</SmallLabel>
+                <DisplayHeading size={isMobile ? 24 : 30}>
+                  Waiting for {revealClaimantPlayer?.name ?? "opponent"} to decide.
+                </DisplayHeading>
+              </>
+            )
           ) : turnPhase === "awaiting_challenge" && pendingAction ? (
             <>
               <SmallLabel color={M.gold}>
