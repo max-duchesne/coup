@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage } from "@/lib/chat";
+import { useMobile } from "@/lib/hooks";
 
 function errMsg(err: unknown, fallback: string): string {
   if (!err) return fallback;
@@ -57,6 +59,27 @@ export default function LobbyView() {
     DEFAULT_ROLE_COUNTS,
   );
   const [settingsPending, setSettingsPending] = useState(false);
+
+  const isMobile = useMobile();
+  const chatOpenRef = useRef(false);
+  const [chatOpen, setChatOpenState] = useState(false);
+  const setChatOpen = useCallback((open: boolean) => {
+    chatOpenRef.current = open;
+    setChatOpenState(open);
+  }, []);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [chatToast, setChatToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNewChatMessage = useCallback((msg: ChatMessage) => {
+    if (!chatOpenRef.current) {
+      setUnreadCount((prev) => prev + 1);
+      const text = `${msg.playerName}: ${msg.message}`;
+      setChatToast(text);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setChatToast(null), 3500);
+    }
+  }, []);
 
   const cancelledRef = useRef(false);
 
@@ -289,7 +312,7 @@ export default function LobbyView() {
       {/* Header */}
       <header
         style={{
-          padding: "28px 48px",
+          padding: isMobile ? "18px 16px" : "28px 24px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -318,10 +341,9 @@ export default function LobbyView() {
         style={{
           flex: 1,
           display: "flex",
+          flexDirection: isMobile ? "column" : "row",
           gap: 24,
-          padding: "32px 24px",
-          maxWidth: 1100,
-          margin: "0 auto",
+          padding: isMobile ? "20px 12px 96px" : "32px 24px",
           width: "100%",
           alignItems: "flex-start",
         }}
@@ -611,11 +633,141 @@ export default function LobbyView() {
           </div>
         </div>
 
-        {/* Right: chat */}
-        {playerId && (
-          <div style={{ width: "clamp(220px, 22vw, 280px)", flexShrink: 0, height: "calc(100vh - 120px)", position: "sticky", top: 24 }}>
-            <Chat gameCode={gameCode} playerId={playerId} playerName={playerName} />
+        {/* Right: chat (desktop only) */}
+        {playerId && !isMobile && (
+          <div style={{ width: "clamp(260px, 24vw, 340px)", flexShrink: 0, height: "calc(100vh - 120px)", position: "sticky", top: 24 }}>
+            <Chat gameCode={gameCode} playerId={playerId} playerName={playerName} onNewMessage={handleNewChatMessage} />
           </div>
+        )}
+
+        {/* Mobile: floating chat button + slide-in overlay + toast */}
+        {playerId && isMobile && (
+          <>
+            {chatToast && (
+              <div
+                style={{
+                  position: "fixed",
+                  top: 16,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  zIndex: 300,
+                  background: M.surface2,
+                  border: `1px solid ${M.border}`,
+                  borderRadius: 12,
+                  padding: "10px 18px",
+                  fontSize: 14,
+                  color: M.text,
+                  maxWidth: "calc(100vw - 48px)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {chatToast}
+              </div>
+            )}
+
+            <button
+              onClick={() => { setChatOpen(true); setUnreadCount(0); }}
+              style={{
+                position: "fixed",
+                bottom: 24,
+                right: 20,
+                zIndex: 100,
+                width: 52,
+                height: 52,
+                borderRadius: "50%",
+                background: M.surface2,
+                border: `1px solid ${M.borderHi}`,
+                color: M.gold,
+                fontSize: 22,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+              }}
+            >
+              ☰
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    right: 6,
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: M.blood,
+                    border: `2px solid ${M.bg}`,
+                  }}
+                />
+              )}
+            </button>
+
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 200,
+                background: M.bg,
+                display: "flex",
+                flexDirection: "column",
+                transform: chatOpen ? "translateX(0)" : "translateX(100%)",
+                transition: "transform 0.2s ease",
+              }}
+            >
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderBottom: `1px solid ${M.border}`,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: FONT_DISPLAY,
+                    fontSize: 13,
+                    letterSpacing: "0.28em",
+                    color: M.muted,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Chat
+                </span>
+                <button
+                  onClick={() => setChatOpen(false)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: M.mutedHi,
+                    fontSize: 20,
+                    cursor: "pointer",
+                    padding: "4px 8px",
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <Chat
+                  gameCode={gameCode}
+                  playerId={playerId}
+                  playerName={playerName}
+                  onNewMessage={handleNewChatMessage}
+                />
+              </div>
+            </div>
+          </>
         )}
       </main>
 
