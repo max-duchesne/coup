@@ -148,9 +148,12 @@ export default function GameView() {
   } | null>(null);
 
   // Exchange selection: keys are "held-{influenceId}" or "drawn-{index}".
-  const [exchangeSelection, setExchangeSelection] = useState<Set<string>>(
-    new Set(),
-  );
+  // sessionKey tracks which exchange we're in so stale selections from a previous
+  // exchange (or from before a card was lost) don't carry over.
+  const [exchangeState, setExchangeState] = useState<{
+    sessionKey: string | null;
+    selection: Set<string>;
+  }>({ sessionKey: null, selection: new Set() });
 
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoLoseInfluenceRef = useRef(false);
@@ -213,13 +216,25 @@ export default function GameView() {
     };
   }, [gameCode, playerId, refreshGameState, refreshLog]);
 
-  // Reset exchange selection whenever we leave the exchange phase.
-  // We compute it derivedly (rather than via setState in effect) to avoid
-  // the set-state-in-effect lint rule.
-  const activeExchangeSelection =
-    gameState?.turnPhase === "ambassador_exchange"
-      ? exchangeSelection
-      : new Set<string>();
+  // Derived exchange selection — computed without setState-in-effect.
+  // Uses a session key (the drawn card array) to detect new exchanges and
+  // auto-select only live cards when the session changes.
+  const activeExchangeSelection = (() => {
+    if (gameState?.turnPhase !== "ambassador_exchange") return new Set<string>();
+    const sessionKey = JSON.stringify(gameState.pendingAmbassadorDraw);
+    const liveKeys = new Set(
+      (gameState.players.find((p) => p.playerId === playerId)?.influences ?? [])
+        .filter((i) => !i.isRevealed)
+        .map((i) => `held-${i.id}`),
+    );
+    if (exchangeState.sessionKey !== sessionKey) return liveKeys;
+    // Filter out any stale keys that are no longer in the pool.
+    const poolKeySet = new Set([
+      ...liveKeys,
+      ...(gameState.pendingAmbassadorDraw ?? []).map((_, idx) => `drawn-${idx}`),
+    ]);
+    return new Set([...exchangeState.selection].filter((k) => poolKeySet.has(k)));
+  })();
 
   // Presence channel
   useEffect(() => {
@@ -347,12 +362,19 @@ export default function GameView() {
     }
   };
 
-  const toggleExchangeCard = (key: string, limit: number) => {
-    setExchangeSelection((prev) => {
-      const next = new Set(prev);
+  const toggleExchangeCard = (
+    key: string,
+    limit: number,
+    currentSessionKey: string,
+    defaultSelection: Set<string>,
+  ) => {
+    setExchangeState((prev) => {
+      const base =
+        prev.sessionKey === currentSessionKey ? prev.selection : defaultSelection;
+      const next = new Set(base);
       if (next.has(key)) next.delete(key);
       else if (next.size < limit) next.add(key);
-      return next;
+      return { sessionKey: currentSessionKey, selection: next };
     });
   };
 
@@ -406,8 +428,10 @@ export default function GameView() {
   const canAssassinate = (me?.coins ?? 0) >= 3;
   const canStealFrom = (p: { coins: number }) => p.coins > 0;
   const myLiveInfluences = (me?.influences ?? []).filter((i) => !i.isRevealed);
-  const iAmEliminated = me ? !isAlive(me) : false;
-  const aliveOpponents = opponents.filter((p) => isAlive(p));
+  const iAmEliminated = me ? !isAlive(me, gameState.cardsPerPlayer) : false;
+  const aliveOpponents = opponents.filter((p) =>
+    isAlive(p, gameState.cardsPerPlayer),
+  );
 
   const iAlreadyPassed = challengePasses.includes(playerId);
   const inBlockChallenge =
@@ -445,6 +469,10 @@ export default function GameView() {
       role,
     })),
   ];
+  const exchangeSessionKey = JSON.stringify(pendingAmbassadorDraw);
+  const exchangeDefaultSelection = new Set(
+    myLiveInfluences.map((i) => `held-${i.id}`),
+  );
 
   const handleResolveExchange = (selection: Set<string>) => {
     const kept: Role[] = exchangePool
@@ -514,6 +542,7 @@ export default function GameView() {
                     pendingTargetId === p.playerId)
                 }
                 isBlocker={pendingBlockerId === p.playerId}
+                cardsPerPlayer={gameState.cardsPerPlayer}
               />
             ))}
           </section>
@@ -639,7 +668,12 @@ export default function GameView() {
                         actionPending || atLimit
                           ? undefined
                           : () =>
-                              toggleExchangeCard(card.key, myLiveInfluences.length)
+                              toggleExchangeCard(
+                                card.key,
+                                myLiveInfluences.length,
+                                exchangeSessionKey,
+                                exchangeDefaultSelection,
+                              )
                       }
                     />
                   );
@@ -1077,14 +1111,16 @@ function OpponentBlock({
   active,
   isPendingTarget,
   isBlocker,
+  cardsPerPlayer,
 }: {
   player: GamePlayer;
   online: boolean;
   active: boolean;
   isPendingTarget: boolean;
   isBlocker: boolean;
+  cardsPerPlayer: number;
 }) {
-  const eliminated = !isAlive(p);
+  const eliminated = !isAlive(p, cardsPerPlayer);
 
   return (
     <div

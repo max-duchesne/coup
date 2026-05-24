@@ -30,7 +30,8 @@ export default function GameCodePage() {
         setView("lobby");
       });
 
-    // Switch to game view the moment a game row is inserted (host starts the game).
+    // Switch to game view when an in_progress game row is inserted.
+    // Lobby settings upserts also fire INSERT events, so we check status.
     const channel = supabase
       .channel(`route:${gameCode}`)
       .on(
@@ -41,8 +42,11 @@ export default function GameCodePage() {
           table: "games",
           filter: `game_code=eq.${gameCode}`,
         },
-        () => {
-          setView("game");
+        (payload) => {
+          const row = payload.new as { status?: string } | null;
+          if (row?.status === "in_progress") {
+            setView("game");
+          }
         },
       )
       .subscribe();
