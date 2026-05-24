@@ -15,14 +15,19 @@ type Props = {
   gameCode: string;
   playerId: string;
   playerName: string;
+  onNewMessage?: (msg: ChatMessage) => void;
 };
 
-export default function Chat({ gameCode, playerId, playerName }: Props) {
+export default function Chat({ gameCode, playerId, playerName, onNewMessage }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const onNewMessageRef = useRef(onNewMessage);
+  useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
+  const playerIdRef = useRef(playerId);
+  useEffect(() => { playerIdRef.current = playerId; }, [playerId]);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -56,18 +61,19 @@ export default function Chat({ gameCode, playerId, playerName }: Props) {
             message: string;
             created_at: string;
           };
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: row.id,
-              gameCode: row.game_code,
-              playerId: row.player_id,
-              playerName: row.player_name,
-              message: row.message,
-              createdAt: row.created_at,
-            },
-          ]);
+          const msg: ChatMessage = {
+            id: row.id,
+            gameCode: row.game_code,
+            playerId: row.player_id,
+            playerName: row.player_name,
+            message: row.message,
+            createdAt: row.created_at,
+          };
+          setMessages((prev) => [...prev, msg]);
           setTimeout(scrollToBottom, 50);
+          if (row.player_id !== playerIdRef.current) {
+            onNewMessageRef.current?.(msg);
+          }
         },
       )
       .subscribe();

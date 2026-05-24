@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage } from "@/lib/chat";
+import { useMobile } from "@/lib/hooks";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { usePlayer } from "@/lib/player";
@@ -154,6 +156,27 @@ export default function GameView() {
     sessionKey: string | null;
     selection: Set<string>;
   }>({ sessionKey: null, selection: new Set() });
+
+  const isMobile = useMobile(960);
+  const chatOpenRef = useRef(false);
+  const [chatOpen, setChatOpenState] = useState(false);
+  const setChatOpen = useCallback((open: boolean) => {
+    chatOpenRef.current = open;
+    setChatOpenState(open);
+  }, []);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [chatToast, setChatToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNewChatMessage = useCallback((msg: ChatMessage) => {
+    if (!chatOpenRef.current) {
+      setUnreadCount((prev) => prev + 1);
+      const text = `${msg.playerName}: ${msg.message}`;
+      setChatToast(text);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setChatToast(null), 3500);
+    }
+  }, []);
 
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoLoseInfluenceRef = useRef(false);
@@ -500,10 +523,9 @@ export default function GameView() {
 
       <main
         style={{
-          maxWidth: 1340,
-          margin: "0 auto",
-          padding: "32px 24px 48px",
+          padding: isMobile ? "16px 12px 96px" : "32px 24px 48px",
           display: "flex",
+          flexDirection: isMobile ? "column" : "row",
           gap: 24,
           alignItems: "flex-start",
           width: "100%",
@@ -524,7 +546,7 @@ export default function GameView() {
           <section
             style={{
               display: "flex",
-              gap: 56,
+              gap: isMobile ? 20 : 48,
               flexWrap: "wrap",
               justifyContent: "center",
             }}
@@ -551,8 +573,8 @@ export default function GameView() {
         {/* Spotlight: contextual content based on phase */}
         <section
           style={{
-            minHeight: 280,
-            padding: "36px 28px",
+            minHeight: isMobile ? 160 : 280,
+            padding: isMobile ? "20px 16px" : "36px 28px",
             background: M.surface,
             border: `1px solid ${M.border}`,
             borderRadius: 18,
@@ -560,7 +582,7 @@ export default function GameView() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: 22,
+            gap: isMobile ? 14 : 22,
             textAlign: "center",
           }}
         >
@@ -829,20 +851,21 @@ export default function GameView() {
             display: "flex",
             justifyContent: "center",
             alignItems: "flex-end",
-            gap: 72,
+            gap: isMobile ? 16 : 32,
+            flexWrap: "wrap",
           }}
         >
-          <div style={{ display: "flex", gap: 18 }}>
+          <div style={{ display: "flex", gap: isMobile ? 10 : 18, flexWrap: "wrap", justifyContent: "center" }}>
             {(me?.influences ?? []).map((inf) => (
               <Card
                 key={inf.id}
                 role={inf.role}
-                size="lg"
+                size={isMobile ? "md" : "lg"}
                 dead={inf.isRevealed}
               />
             ))}
             {iAmEliminated && me && me.influences.length === 0 && (
-              <Card back size="lg" dead />
+              <Card back size={isMobile ? "md" : "lg"} dead />
             )}
           </div>
           <div
@@ -859,19 +882,19 @@ export default function GameView() {
           </div>
         </section>
 
-        {/* Log */}
-        {mergedLog.length > 0 && (
+        {/* Log — mobile only (desktop log lives in the right sidebar) */}
+        {isMobile && mergedLog.length > 0 && (
           <section
             style={{
               background: M.surface,
               border: `1px solid ${M.border}`,
               borderRadius: 18,
-              padding: "18px 22px",
-              maxHeight: 280,
+              padding: "14px 18px",
+              maxHeight: 140,
               overflowY: "auto",
             }}
           >
-            <SmallLabel style={{ marginBottom: 12 }}>Log</SmallLabel>
+            <SmallLabel style={{ marginBottom: 8 }}>Log</SmallLabel>
             <ol
               style={{
                 margin: 0,
@@ -879,18 +902,15 @@ export default function GameView() {
                 listStyle: "none",
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
-                fontSize: 16,
+                gap: 6,
+                fontSize: 14,
                 color: M.mutedHi,
-                letterSpacing: "0.005em",
               }}
             >
-              {mergedLog.map((entry, i) => (
+              {mergedLog.slice(-6).map((entry, i, arr) => (
                 <li
                   key={entry.key}
-                  style={{
-                    color: i === mergedLog.length - 1 ? M.text : M.mutedHi,
-                  }}
+                  style={{ color: i === arr.length - 1 ? M.text : M.mutedHi }}
                 >
                   {entry.message}
                 </li>
@@ -900,18 +920,198 @@ export default function GameView() {
         )}
         </div>
 
-        {/* Right: chat */}
-        <div
-          style={{
-            width: "clamp(220px, 22vw, 280px)",
-            flexShrink: 0,
-            height: "calc(100vh - 100px)",
-            position: "sticky",
-            top: 24,
-          }}
-        >
-          <Chat gameCode={gameCode} playerId={playerId} playerName={playerName} />
-        </div>
+        {/* Right sidebar: log + chat (desktop only) */}
+        {!isMobile && (
+          <div
+            style={{
+              width: "clamp(260px, 24vw, 340px)",
+              flexShrink: 0,
+              height: "calc(100vh - 100px)",
+              position: "sticky",
+              top: 24,
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            {mergedLog.length > 0 && (
+              <section
+                style={{
+                  flexShrink: 0,
+                  maxHeight: 300,
+                  overflowY: "auto",
+                  background: M.surface,
+                  border: `1px solid ${M.border}`,
+                  borderRadius: 18,
+                  padding: "18px 22px",
+                }}
+              >
+                <SmallLabel style={{ marginBottom: 12 }}>Log</SmallLabel>
+                <ol
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    listStyle: "none",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    fontSize: 16,
+                    color: M.mutedHi,
+                    letterSpacing: "0.005em",
+                  }}
+                >
+                  {mergedLog.map((entry, i) => (
+                    <li
+                      key={entry.key}
+                      style={{ color: i === mergedLog.length - 1 ? M.text : M.mutedHi }}
+                    >
+                      {entry.message}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <Chat
+                gameCode={gameCode}
+                playerId={playerId}
+                playerName={playerName}
+                onNewMessage={handleNewChatMessage}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Mobile: floating chat button + slide-in overlay + toast */}
+        {isMobile && (
+          <>
+            {chatToast && (
+              <div
+                style={{
+                  position: "fixed",
+                  top: 16,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  zIndex: 300,
+                  background: M.surface2,
+                  border: `1px solid ${M.border}`,
+                  borderRadius: 12,
+                  padding: "10px 18px",
+                  fontSize: 14,
+                  color: M.text,
+                  maxWidth: "calc(100vw - 48px)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+                  pointerEvents: "none",
+                }}
+              >
+                {chatToast}
+              </div>
+            )}
+
+            <button
+              onClick={() => { setChatOpen(true); setUnreadCount(0); }}
+              style={{
+                position: "fixed",
+                bottom: 24,
+                right: 20,
+                zIndex: 100,
+                width: 52,
+                height: 52,
+                borderRadius: "50%",
+                background: M.surface2,
+                border: `1px solid ${M.borderHi}`,
+                color: M.gold,
+                fontSize: 22,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+              }}
+            >
+              ☰
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    right: 6,
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: M.blood,
+                    border: `2px solid ${M.bg}`,
+                  }}
+                />
+              )}
+            </button>
+
+            {/* Always mounted so subscription stays active */}
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 200,
+                background: M.bg,
+                display: "flex",
+                flexDirection: "column",
+                transform: chatOpen ? "translateX(0)" : "translateX(100%)",
+                transition: "transform 0.2s ease",
+              }}
+            >
+              <div
+                style={{
+                  padding: "14px 20px",
+                  borderBottom: `1px solid ${M.border}`,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: FONT_DISPLAY,
+                    fontSize: 13,
+                    letterSpacing: "0.28em",
+                    color: M.muted,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Chat
+                </span>
+                <button
+                  onClick={() => setChatOpen(false)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: M.mutedHi,
+                    fontSize: 20,
+                    cursor: "pointer",
+                    padding: "4px 8px",
+                    lineHeight: 1,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <Chat
+                  gameCode={gameCode}
+                  playerId={playerId}
+                  playerName={playerName}
+                  onNewMessage={handleNewChatMessage}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </Frame>
   );
@@ -960,6 +1160,7 @@ function ActionTray({
           flexWrap: "wrap",
           justifyContent: "center",
           marginTop: 8,
+          width: "100%",
         }}
       >
         <ActionPill
