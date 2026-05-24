@@ -215,7 +215,12 @@ export default function LobbyView() {
     [players, playerId],
   );
 
-  const hostId = players[0]?.id;
+  // Host is always the player with the earliest joined_at — not players[0],
+  // since the array is now sorted by desired_seat_order after drag-and-drop.
+  const hostId = players.reduce<LobbyPlayer | null>(
+    (earliest, p) => (!earliest || p.joined_at < earliest.joined_at ? p : earliest),
+    null,
+  )?.id;
   const isHost = Boolean(hostId && hostId === playerId);
   const allReady =
     players.length > 0 &&
@@ -463,6 +468,7 @@ export default function LobbyView() {
                 const isPlayerHost = p.id === hostId;
                 const isDraggable = isHost && !randomizeTurnOrder;
                 const isDraggingThis = draggingId === p.id;
+                const showDropLine = isDraggingThis && draggingId !== null;
                 const status = !online
                   ? { text: "Disconnected", color: M.muted }
                   : p.is_ready
@@ -470,8 +476,11 @@ export default function LobbyView() {
                     : { text: "○ Not ready", color: M.gold };
 
                 return (
+                  <React.Fragment key={p.id}>
+                    {showDropLine && (
+                      <div style={{ height: 2, background: M.gold, borderRadius: 1, margin: "2px 14px" }} />
+                    )}
                   <div
-                    key={p.id}
                     draggable={isDraggable}
                     onDragStart={isDraggable ? () => handleDragStart(p.id) : undefined}
                     onDragOver={isDraggable ? (e) => handleDragOver(e, p.id) : undefined}
@@ -485,7 +494,7 @@ export default function LobbyView() {
                       borderRadius: 12,
                       borderBottom:
                         i < displayedPlayers.length - 1 ? `1px solid ${M.border}` : "none",
-                      opacity: isDraggingThis ? 0.4 : 1,
+                      opacity: isDraggingThis ? 0.3 : 1,
                       cursor: isDraggable ? "grab" : "default",
                       transition: "opacity 0.15s",
                     }}
@@ -548,6 +557,7 @@ export default function LobbyView() {
                       {status.text}
                     </div>
                   </div>
+                  </React.Fragment>
                 );
               })
             )}
