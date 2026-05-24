@@ -188,10 +188,21 @@ export const BLOCK_ROLES: Record<PendingAction, Role[]> = {
 
 // ─── Game setup ──────────────────────────────────────────────────────────────
 
+function shuffle<T>(items: readonly T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export async function startGame(
   gameCode: string,
   playerIds: string[],
 ): Promise<void> {
+  const turnOrder = shuffle(playerIds);
+
   const { error: cleanupError } = await supabase
     .from("games")
     .delete()
@@ -200,13 +211,13 @@ export async function startGame(
 
   const { error: gameError } = await supabase.from("games").insert({
     game_code: gameCode,
-    current_turn_player_id: playerIds[0],
+    current_turn_player_id: turnOrder[0],
     status: "in_progress",
   });
   if (gameError) throw gameError;
 
   const { error: playersError } = await supabase.from("game_players").insert(
-    playerIds.map((playerId, index) => ({
+    turnOrder.map((playerId, index) => ({
       player_id: playerId,
       game_code: gameCode,
       seat_order: index,
