@@ -133,7 +133,6 @@ export type Database = {
       games: {
         Row: {
           cards_per_player: number
-          cards_per_role: number
           challenge_passes: string[]
           created_at: string
           current_turn_player_id: string
@@ -146,13 +145,13 @@ export type Database = {
           pending_block_role: string | null
           pending_blocker_id: string | null
           pending_target_id: string | null
+          role_counts: Json
           status: string
           turn_phase: string
           winner_id: string | null
         }
         Insert: {
           cards_per_player?: number
-          cards_per_role?: number
           challenge_passes?: string[]
           created_at?: string
           current_turn_player_id: string
@@ -165,13 +164,13 @@ export type Database = {
           pending_block_role?: string | null
           pending_blocker_id?: string | null
           pending_target_id?: string | null
+          role_counts?: Json
           status?: string
           turn_phase?: string
           winner_id?: string | null
         }
         Update: {
           cards_per_player?: number
-          cards_per_role?: number
           challenge_passes?: string[]
           created_at?: string
           current_turn_player_id?: string
@@ -184,6 +183,7 @@ export type Database = {
           pending_block_role?: string | null
           pending_blocker_id?: string | null
           pending_target_id?: string | null
+          role_counts?: Json
           status?: string
           turn_phase?: string
           winner_id?: string | null
