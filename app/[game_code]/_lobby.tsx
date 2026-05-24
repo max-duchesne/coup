@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function errMsg(err: unknown, fallback: string): string {
   if (!err) return fallback;
@@ -13,7 +13,14 @@ function errMsg(err: unknown, fallback: string): string {
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { usePlayer } from "@/lib/player";
-import { startGame, updateLobbySettings } from "@/lib/game";
+import {
+  startGame,
+  updateLobbySettings,
+  ALL_ROLES,
+  DEFAULT_ROLE_COUNTS,
+  ROLE_LABELS,
+  type Role,
+} from "@/lib/game";
 import {
   fetchLobbyPlayers,
   setLobbyPlayerReady,
@@ -46,7 +53,9 @@ export default function LobbyView() {
   const [readyPending, setReadyPending] = useState(false);
   const [startPending, setStartPending] = useState(false);
   const [cardsPerPlayer, setCardsPerPlayer] = useState(2);
-  const [cardsPerRole, setCardsPerRole] = useState(3);
+  const [roleCounts, setRoleCounts] = useState<Record<Role, number>>(
+    DEFAULT_ROLE_COUNTS,
+  );
   const [settingsPending, setSettingsPending] = useState(false);
 
   const cancelledRef = useRef(false);
@@ -82,12 +91,13 @@ export default function LobbyView() {
       if (!cancelledRef.current) {
         const { data: existingGame } = await supabase
           .from("games")
-          .select("cards_per_player, cards_per_role")
+          .select("cards_per_player, role_counts")
           .eq("game_code", gameCode)
           .maybeSingle();
         if (existingGame && !cancelledRef.current) {
           setCardsPerPlayer(existingGame.cards_per_player);
-          setCardsPerRole(existingGame.cards_per_role);
+          if (existingGame.role_counts)
+            setRoleCounts(existingGame.role_counts as Record<Role, number>);
         }
       }
     })();
@@ -117,7 +127,7 @@ export default function LobbyView() {
         (payload) => {
           const row = payload.new as {
             cards_per_player?: number;
-            cards_per_role?: number;
+            role_counts?: Record<Role, number>;
             status?: string;
           } | null;
           // Only apply settings updates for lobby rows, not in_progress rows
@@ -125,8 +135,8 @@ export default function LobbyView() {
           if (row && row.status !== "in_progress" && row.status !== "finished") {
             if (row.cards_per_player != null)
               setCardsPerPlayer(row.cards_per_player);
-            if (row.cards_per_role != null)
-              setCardsPerRole(row.cards_per_role);
+            if (row.role_counts != null)
+              setRoleCounts(row.role_counts);
           }
         },
       )
@@ -190,20 +200,28 @@ export default function LobbyView() {
     }
   };
 
-  const handleSettingChange = async (
-    key: "cardsPerPlayer" | "cardsPerRole",
-    value: number,
-  ) => {
+  const handleCardsPerPlayerChange = async (value: number) => {
     if (!isHost || !playerId) return;
-    const clamped = Math.max(1, Math.min(5, value));
-    const nextCpp = key === "cardsPerPlayer" ? clamped : cardsPerPlayer;
-    const nextCpr = key === "cardsPerRole" ? clamped : cardsPerRole;
-    // Optimistic update
-    setCardsPerPlayer(nextCpp);
-    setCardsPerRole(nextCpr);
+    const next = Math.max(1, Math.min(5, value));
+    setCardsPerPlayer(next);
     setSettingsPending(true);
     try {
-      await updateLobbySettings(gameCode, playerId, nextCpp, nextCpr);
+      await updateLobbySettings(gameCode, playerId, next, roleCounts);
+    } catch (err) {
+      setLoadError(errMsg(err, "Failed to update settings"));
+    } finally {
+      setSettingsPending(false);
+    }
+  };
+
+  const handleRoleCountChange = async (role: Role, value: number) => {
+    if (!isHost || !playerId) return;
+    const next = Math.max(1, Math.min(10, value));
+    const nextCounts = { ...roleCounts, [role]: next };
+    setRoleCounts(nextCounts);
+    setSettingsPending(true);
+    try {
+      await updateLobbySettings(gameCode, playerId, cardsPerPlayer, nextCounts);
     } catch (err) {
       setLoadError(errMsg(err, "Failed to update settings"));
     } finally {
@@ -225,6 +243,30 @@ export default function LobbyView() {
     }
   };
 
+
+  const stepBtnStyle = (active: boolean): React.CSSProperties => ({
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    border: `1px solid ${M.border}`,
+    background: M.surface2,
+    color: M.text,
+    cursor: active ? "pointer" : "not-allowed",
+    opacity: active ? 1 : 0.4,
+    fontSize: 16,
+    lineHeight: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  });
+
+  const counterStyle: React.CSSProperties = {
+    fontSize: 20,
+    color: M.text,
+    minWidth: 24,
+    textAlign: "center",
+    fontVariantNumeric: "tabular-nums",
+  };
 
   if (playerLoading || !playerId) {
     return (
@@ -431,126 +473,98 @@ export default function LobbyView() {
             >
               Game settings
             </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 32,
-                flexWrap: "wrap",
-                justifyContent: "center",
-              }}
-            >
-              {(
-                [
-                  {
-                    label: "Cards per player",
-                    key: "cardsPerPlayer" as const,
-                    value: cardsPerPlayer,
-                  },
-                  {
-                    label: "Copies of each role",
-                    key: "cardsPerRole" as const,
-                    value: cardsPerRole,
-                  },
-                ] as const
-              ).map(({ label, key, value }) => (
+            {/* Cards per player row */}
+            {(() => {
+              const value = cardsPerPlayer;
+              return (
                 <div
-                  key={key}
                   style={{
                     display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
                     alignItems: "center",
-                    minWidth: 140,
+                    justifyContent: "space-between",
+                    marginBottom: 20,
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 13,
-                      color: M.mutedHi,
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    {label}
+                  <div style={{ fontSize: 13, color: M.mutedHi, letterSpacing: "0.05em" }}>
+                    Cards per player
                   </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <button
                       disabled={!isHost || settingsPending || value <= 1}
-                      onClick={() => void handleSettingChange(key, value - 1)}
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        border: `1px solid ${M.border}`,
-                        background: M.surface2,
-                        color: M.text,
-                        cursor:
-                          isHost && !settingsPending && value > 1
-                            ? "pointer"
-                            : "not-allowed",
-                        opacity:
-                          isHost && !settingsPending && value > 1 ? 1 : 0.4,
-                        fontSize: 16,
-                        lineHeight: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
+                      onClick={() => void handleCardsPerPlayerChange(value - 1)}
+                      style={stepBtnStyle(isHost && !settingsPending && value > 1)}
                     >
                       −
                     </button>
-                    <span
-                      style={{
-                        fontSize: 22,
-                        color: M.text,
-                        minWidth: 24,
-                        textAlign: "center",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {value}
-                    </span>
+                    <span style={counterStyle}>{value}</span>
                     <button
                       disabled={!isHost || settingsPending || value >= 5}
-                      onClick={() => void handleSettingChange(key, value + 1)}
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        border: `1px solid ${M.border}`,
-                        background: M.surface2,
-                        color: M.text,
-                        cursor:
-                          isHost && !settingsPending && value < 5
-                            ? "pointer"
-                            : "not-allowed",
-                        opacity:
-                          isHost && !settingsPending && value < 5 ? 1 : 0.4,
-                        fontSize: 16,
-                        lineHeight: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
+                      onClick={() => void handleCardsPerPlayerChange(value + 1)}
+                      style={stepBtnStyle(isHost && !settingsPending && value < 5)}
                     >
                       +
                     </button>
                   </div>
-                  {!isHost && (
-                    <div
-                      style={{ fontSize: 11, color: M.muted, letterSpacing: "0.1em" }}
-                    >
-                      Host only
-                    </div>
-                  )}
                 </div>
-              ))}
+              );
+            })()}
+
+            {/* Divider */}
+            <div
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                color: M.muted,
+                marginBottom: 12,
+              }}
+            >
+              Copies per role
             </div>
+
+            {/* Per-role rows */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {ALL_ROLES.map((role) => {
+                const value = roleCounts[role];
+                return (
+                  <div
+                    key={role}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: M.mutedHi, letterSpacing: "0.05em" }}>
+                      {ROLE_LABELS[role]}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <button
+                        disabled={!isHost || settingsPending || value <= 1}
+                        onClick={() => void handleRoleCountChange(role, value - 1)}
+                        style={stepBtnStyle(isHost && !settingsPending && value > 1)}
+                      >
+                        −
+                      </button>
+                      <span style={counterStyle}>{value}</span>
+                      <button
+                        disabled={!isHost || settingsPending || value >= 10}
+                        onClick={() => void handleRoleCountChange(role, value + 1)}
+                        style={stepBtnStyle(isHost && !settingsPending && value < 10)}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {!isHost && (
+              <div style={{ fontSize: 11, color: M.muted, letterSpacing: "0.1em", marginTop: 12 }}>
+                Host only
+              </div>
+            )}
           </div>
 
           {/* Actions */}

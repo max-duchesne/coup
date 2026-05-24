@@ -37,6 +37,33 @@ export const ROLE_LABELS: Record<Role, string> = {
   contessa: "Contessa",
 };
 
+export const ALL_ROLES: readonly Role[] = [
+  "duke",
+  "assassin",
+  "captain",
+  "ambassador",
+  "contessa",
+];
+
+export const DEFAULT_ROLE_COUNTS: Record<Role, number> = {
+  duke: 3,
+  assassin: 3,
+  captain: 3,
+  ambassador: 3,
+  contessa: 3,
+};
+
+/** Returns the full unshuffled deck for the given per-role counts. */
+export function buildDeck(roleCounts: Record<Role, number>): Role[] {
+  const deck: Role[] = [];
+  for (const role of ALL_ROLES) {
+    for (let i = 0; i < roleCounts[role]; i++) {
+      deck.push(role);
+    }
+  }
+  return deck;
+}
+
 export type Influence = {
   id: number;
   role: Role;
@@ -113,7 +140,7 @@ export type GameState = {
   winnerId: string | null;
   nextGameCode: string | null;
   cardsPerPlayer: number;
-  cardsPerRole: number;
+  roleCounts: Record<Role, number>;
   players: GamePlayer[];
 };
 
@@ -206,12 +233,14 @@ export async function startGame(
   // Preserve lobby settings written by the host before the game starts.
   const { data: existingGame } = await supabase
     .from("games")
-    .select("cards_per_player, cards_per_role")
+    .select("cards_per_player, role_counts")
     .eq("game_code", gameCode)
     .maybeSingle();
 
   const cardsPerPlayer = existingGame?.cards_per_player ?? 2;
-  const cardsPerRole = existingGame?.cards_per_role ?? 3;
+  const roleCounts =
+    (existingGame?.role_counts as Record<Role, number> | null) ??
+    DEFAULT_ROLE_COUNTS;
 
   const { error: cleanupError } = await supabase
     .from("games")
@@ -224,7 +253,7 @@ export async function startGame(
     current_turn_player_id: turnOrder[0],
     status: "in_progress",
     cards_per_player: cardsPerPlayer,
-    cards_per_role: cardsPerRole,
+    role_counts: roleCounts,
   });
   if (gameError) throw gameError;
 
@@ -249,7 +278,7 @@ export async function updateLobbySettings(
   gameCode: string,
   hostId: string,
   cardsPerPlayer: number,
-  cardsPerRole: number,
+  roleCounts: Record<Role, number>,
 ): Promise<void> {
   const { error } = await supabase.from("games").upsert(
     {
@@ -257,7 +286,7 @@ export async function updateLobbySettings(
       current_turn_player_id: hostId,
       status: "lobby",
       cards_per_player: cardsPerPlayer,
-      cards_per_role: cardsPerRole,
+      role_counts: roleCounts,
     },
     { onConflict: "game_code" },
   );
@@ -746,7 +775,7 @@ export async function fetchGameState(
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_action, pending_action_target_id, pending_blocker_id, pending_block_role, lose_influence_reason, challenge_passes, pending_ambassador_draw, winner_id, next_game_code, cards_per_player, cards_per_role",
+      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_action, pending_action_target_id, pending_blocker_id, pending_block_role, lose_influence_reason, challenge_passes, pending_ambassador_draw, winner_id, next_game_code, cards_per_player, role_counts",
     )
     .eq("game_code", gameCode)
     .in("status", ["in_progress", "finished"])
@@ -818,7 +847,8 @@ export async function fetchGameState(
     winnerId: game.winner_id,
     nextGameCode: game.next_game_code,
     cardsPerPlayer: game.cards_per_player ?? 2,
-    cardsPerRole: game.cards_per_role ?? 3,
+    roleCounts:
+      (game.role_counts as Record<Role, number> | null) ?? DEFAULT_ROLE_COUNTS,
     players,
   };
 }
