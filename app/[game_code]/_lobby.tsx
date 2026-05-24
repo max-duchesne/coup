@@ -333,7 +333,7 @@ export default function LobbyView() {
                 const online = onlineIds.has(p.id);
                 const isPlayerHost = p.id === hostId;
                 const status = !online
-                  ? { text: "Offline", color: M.muted }
+                  ? { text: "Disconnected", color: M.muted }
                   : p.is_ready
                     ? { text: "● Ready", color: M.good }
                     : { text: "○ Not ready", color: M.gold };
