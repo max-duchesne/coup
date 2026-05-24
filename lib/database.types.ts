@@ -132,6 +132,8 @@ export type Database = {
       }
       games: {
         Row: {
+          cards_per_player: number
+          cards_per_role: number
           challenge_passes: string[]
           created_at: string
           current_turn_player_id: string
@@ -149,6 +151,8 @@ export type Database = {
           winner_id: string | null
         }
         Insert: {
+          cards_per_player?: number
+          cards_per_role?: number
           challenge_passes?: string[]
           created_at?: string
           current_turn_player_id: string
@@ -166,6 +170,8 @@ export type Database = {
           winner_id?: string | null
         }
         Update: {
+          cards_per_player?: number
+          cards_per_role?: number
           challenge_passes?: string[]
           created_at?: string
           current_turn_player_id?: string

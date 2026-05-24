@@ -60,22 +60,20 @@ export type GamePlayer = {
 };
 
 /**
- * Every player starts with this many face-down influences. Used together
- * with `revealedCount` to determine aliveness in a way that doesn't depend
- * on the caller being able to see the opponent's actual cards.
- */
-const STARTING_INFLUENCES = 2;
-
-/**
  * Whether a player still has at least one face-down influence.
  *
  * Implemented in terms of `revealedCount` (visible to every game
  * participant via `game_players` RLS) instead of `influences.some(i => !i.isRevealed)`,
  * because the latter only works when the caller can read the opponent's
  * unrevealed cards — which RLS prevents.
+ *
+ * `cardsPerPlayer` comes from the game row (configurable per lobby).
  */
-export function isAlive(p: Pick<GamePlayer, "revealedCount">): boolean {
-  return p.revealedCount < STARTING_INFLUENCES;
+export function isAlive(
+  p: Pick<GamePlayer, "revealedCount">,
+  cardsPerPlayer: number,
+): boolean {
+  return p.revealedCount < cardsPerPlayer;
 }
 
 /**
@@ -114,6 +112,8 @@ export type GameState = {
   pendingAmbassadorDraw: Role[] | null;
   winnerId: string | null;
   nextGameCode: string | null;
+  cardsPerPlayer: number;
+  cardsPerRole: number;
   players: GamePlayer[];
 };
 
@@ -203,6 +203,16 @@ export async function startGame(
 ): Promise<void> {
   const turnOrder = shuffle(playerIds);
 
+  // Preserve lobby settings written by the host before the game starts.
+  const { data: existingGame } = await supabase
+    .from("games")
+    .select("cards_per_player, cards_per_role")
+    .eq("game_code", gameCode)
+    .maybeSingle();
+
+  const cardsPerPlayer = existingGame?.cards_per_player ?? 2;
+  const cardsPerRole = existingGame?.cards_per_role ?? 3;
+
   const { error: cleanupError } = await supabase
     .from("games")
     .delete()
@@ -213,6 +223,8 @@ export async function startGame(
     game_code: gameCode,
     current_turn_player_id: turnOrder[0],
     status: "in_progress",
+    cards_per_player: cardsPerPlayer,
+    cards_per_role: cardsPerRole,
   });
   if (gameError) throw gameError;
 
@@ -230,6 +242,26 @@ export async function startGame(
     p_game_code: gameCode,
   });
   if (dealError) throw dealError;
+}
+
+/** Update lobby settings (host only; call before startGame). */
+export async function updateLobbySettings(
+  gameCode: string,
+  hostId: string,
+  cardsPerPlayer: number,
+  cardsPerRole: number,
+): Promise<void> {
+  const { error } = await supabase.from("games").upsert(
+    {
+      game_code: gameCode,
+      current_turn_player_id: hostId,
+      status: "lobby",
+      cards_per_player: cardsPerPlayer,
+      cards_per_role: cardsPerRole,
+    },
+    { onConflict: "game_code" },
+  );
+  if (error) throw error;
 }
 
 // ─── Non-challengeable, non-blockable actions ───────────────────────────────
@@ -367,7 +399,8 @@ export async function passChallenge(
 
   const me = state.players.find((p) => p.playerId === playerId);
   if (!me) throw new Error("Player not in game");
-  if (!isAlive(me)) throw new Error("Eliminated players cannot pass");
+  if (!isAlive(me, state.cardsPerPlayer))
+    throw new Error("Eliminated players cannot pass");
 
   // The "owner" of the current claim cannot pass on their own claim.
   // - In action phase: the actor.
@@ -393,7 +426,9 @@ export async function passChallenge(
   const refreshedClaimOwnerId =
     refreshed.pendingBlockerId ?? refreshed.currentTurnPlayerId;
   const aliveResponders = refreshed.players.filter(
-    (p) => p.playerId !== refreshedClaimOwnerId && isAlive(p),
+    (p) =>
+      p.playerId !== refreshedClaimOwnerId &&
+      isAlive(p, refreshed.cardsPerPlayer),
   );
   const allPassed = aliveResponders.every((p) =>
     refreshed.challengePasses.includes(p.playerId),
@@ -445,7 +480,8 @@ export async function submitBlock(
 
   const blocker = state.players.find((p) => p.playerId === blockerId);
   if (!blocker) throw new Error("Player not in game");
-  if (!isAlive(blocker)) throw new Error("Eliminated players cannot block");
+  if (!isAlive(blocker, state.cardsPerPlayer))
+    throw new Error("Eliminated players cannot block");
 
   const allowedRoles = BLOCK_ROLES[state.pendingAction];
   if (!allowedRoles.includes(blockRole))
@@ -674,7 +710,7 @@ export function eligibleBlockRoles(
   if (!state.pendingAction) return [];
 
   const me = state.players.find((p) => p.playerId === playerId);
-  if (!me || !isAlive(me)) return [];
+  if (!me || !isAlive(me, state.cardsPerPlayer)) return [];
 
   const allowed = BLOCK_ROLES[state.pendingAction];
   if (allowed.length === 0) return [];
@@ -710,9 +746,10 @@ export async function fetchGameState(
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_action, pending_action_target_id, pending_blocker_id, pending_block_role, lose_influence_reason, challenge_passes, pending_ambassador_draw, winner_id, next_game_code",
+      "game_code, status, current_turn_player_id, turn_phase, pending_target_id, pending_action, pending_action_target_id, pending_blocker_id, pending_block_role, lose_influence_reason, challenge_passes, pending_ambassador_draw, winner_id, next_game_code, cards_per_player, cards_per_role",
     )
     .eq("game_code", gameCode)
+    .in("status", ["in_progress", "finished"])
     .single();
 
   if (gameError) {
@@ -780,6 +817,8 @@ export async function fetchGameState(
     pendingAmbassadorDraw: game.pending_ambassador_draw as Role[] | null,
     winnerId: game.winner_id,
     nextGameCode: game.next_game_code,
+    cardsPerPlayer: game.cards_per_player ?? 2,
+    cardsPerRole: game.cards_per_role ?? 3,
     players,
   };
 }
@@ -825,7 +864,7 @@ function nextAliveTurnOrder(
   for (let i = 1; i <= n; i++) {
     const nextSeat = (currentSeat + i) % n;
     const candidate = state.players.find((p) => p.seatOrder === nextSeat);
-    if (candidate && isAlive(candidate)) {
+    if (candidate && isAlive(candidate, state.cardsPerPlayer)) {
       return candidate.playerId;
     }
   }
@@ -984,7 +1023,7 @@ async function _resolvePendingAction(state: GameState): Promise<void> {
       );
       if (!target) throw new Error("Target player not in game");
 
-      const targetAlive = isAlive(target);
+      const targetAlive = isAlive(target, state.cardsPerPlayer);
 
       await supabase.from("game_events").insert({
         game_code: state.gameCode,

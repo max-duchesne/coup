@@ -13,7 +13,7 @@ function errMsg(err: unknown, fallback: string): string {
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { usePlayer } from "@/lib/player";
-import { startGame } from "@/lib/game";
+import { startGame, updateLobbySettings } from "@/lib/game";
 import {
   fetchLobbyPlayers,
   setLobbyPlayerReady,
@@ -45,6 +45,9 @@ export default function LobbyView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [readyPending, setReadyPending] = useState(false);
   const [startPending, setStartPending] = useState(false);
+  const [cardsPerPlayer, setCardsPerPlayer] = useState(2);
+  const [cardsPerRole, setCardsPerRole] = useState(3);
+  const [settingsPending, setSettingsPending] = useState(false);
 
   const cancelledRef = useRef(false);
 
@@ -54,7 +57,7 @@ export default function LobbyView() {
     setLoadError(null);
   }, [gameCode]);
 
-  // DB channel — seat list and ready state only.
+  // DB channel — seat list, ready state, and game settings.
   // Game-start navigation is handled by the parent page router.
   useEffect(() => {
     if (!playerId || !gameCode) return;
@@ -71,9 +74,20 @@ export default function LobbyView() {
         if (!cancelledRef.current) await refreshPlayers();
       } catch (err) {
         if (!cancelledRef.current) {
-          setLoadError(
-            errMsg(err, "Failed to join lobby"),
-          );
+          setLoadError(errMsg(err, "Failed to join lobby"));
+        }
+      }
+
+      // Load any settings the host already set.
+      if (!cancelledRef.current) {
+        const { data: existingGame } = await supabase
+          .from("games")
+          .select("cards_per_player, cards_per_role")
+          .eq("game_code", gameCode)
+          .maybeSingle();
+        if (existingGame && !cancelledRef.current) {
+          setCardsPerPlayer(existingGame.cards_per_player);
+          setCardsPerRole(existingGame.cards_per_role);
         }
       }
     })();
@@ -90,6 +104,30 @@ export default function LobbyView() {
         },
         () => {
           void refreshPlayers();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "games",
+          filter: `game_code=eq.${gameCode}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            cards_per_player?: number;
+            cards_per_role?: number;
+            status?: string;
+          } | null;
+          // Only apply settings updates for lobby rows, not in_progress rows
+          // (page.tsx handles the in_progress transition to game view).
+          if (row && row.status !== "in_progress" && row.status !== "finished") {
+            if (row.cards_per_player != null)
+              setCardsPerPlayer(row.cards_per_player);
+            if (row.cards_per_role != null)
+              setCardsPerRole(row.cards_per_role);
+          }
         },
       )
       .subscribe();
@@ -149,6 +187,27 @@ export default function LobbyView() {
       );
     } finally {
       setReadyPending(false);
+    }
+  };
+
+  const handleSettingChange = async (
+    key: "cardsPerPlayer" | "cardsPerRole",
+    value: number,
+  ) => {
+    if (!isHost || !playerId) return;
+    const clamped = Math.max(1, Math.min(5, value));
+    const nextCpp = key === "cardsPerPlayer" ? clamped : cardsPerPlayer;
+    const nextCpr = key === "cardsPerRole" ? clamped : cardsPerRole;
+    // Optimistic update
+    setCardsPerPlayer(nextCpp);
+    setCardsPerRole(nextCpr);
+    setSettingsPending(true);
+    try {
+      await updateLobbySettings(gameCode, playerId, nextCpp, nextCpr);
+    } catch (err) {
+      setLoadError(errMsg(err, "Failed to update settings"));
+    } finally {
+      setSettingsPending(false);
     }
   };
 
@@ -348,6 +407,150 @@ export default function LobbyView() {
                 );
               })
             )}
+          </div>
+
+          {/* Settings panel */}
+          <div
+            style={{
+              marginTop: 28,
+              background: M.surface,
+              border: `1px solid ${M.border}`,
+              borderRadius: 18,
+              padding: "20px 24px",
+              textAlign: "left",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: M.muted,
+                marginBottom: 16,
+              }}
+            >
+              Game settings
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 32,
+                flexWrap: "wrap",
+                justifyContent: "center",
+              }}
+            >
+              {(
+                [
+                  {
+                    label: "Cards per player",
+                    key: "cardsPerPlayer" as const,
+                    value: cardsPerPlayer,
+                  },
+                  {
+                    label: "Copies of each role",
+                    key: "cardsPerRole" as const,
+                    value: cardsPerRole,
+                  },
+                ] as const
+              ).map(({ label, key, value }) => (
+                <div
+                  key={key}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    alignItems: "center",
+                    minWidth: 140,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: M.mutedHi,
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    {label}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <button
+                      disabled={!isHost || settingsPending || value <= 1}
+                      onClick={() => void handleSettingChange(key, value - 1)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 8,
+                        border: `1px solid ${M.border}`,
+                        background: M.surface2,
+                        color: M.text,
+                        cursor:
+                          isHost && !settingsPending && value > 1
+                            ? "pointer"
+                            : "not-allowed",
+                        opacity:
+                          isHost && !settingsPending && value > 1 ? 1 : 0.4,
+                        fontSize: 16,
+                        lineHeight: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      −
+                    </button>
+                    <span
+                      style={{
+                        fontSize: 22,
+                        color: M.text,
+                        minWidth: 24,
+                        textAlign: "center",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {value}
+                    </span>
+                    <button
+                      disabled={!isHost || settingsPending || value >= 5}
+                      onClick={() => void handleSettingChange(key, value + 1)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 8,
+                        border: `1px solid ${M.border}`,
+                        background: M.surface2,
+                        color: M.text,
+                        cursor:
+                          isHost && !settingsPending && value < 5
+                            ? "pointer"
+                            : "not-allowed",
+                        opacity:
+                          isHost && !settingsPending && value < 5 ? 1 : 0.4,
+                        fontSize: 16,
+                        lineHeight: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+                  {!isHost && (
+                    <div
+                      style={{ fontSize: 11, color: M.muted, letterSpacing: "0.1em" }}
+                    >
+                      Host only
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Actions */}
