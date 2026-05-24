@@ -216,7 +216,7 @@ export default function LobbyView() {
 
   const handleRoleCountChange = async (role: Role, value: number) => {
     if (!isHost || !playerId) return;
-    const next = Math.max(1, Math.min(10, value));
+    const next = Math.max(0, Math.min(10, value));
     const nextCounts = { ...roleCounts, [role]: next };
     setRoleCounts(nextCounts);
     setSettingsPending(true);
@@ -540,9 +540,9 @@ export default function LobbyView() {
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <button
-                        disabled={!isHost || settingsPending || value <= 1}
+                        disabled={!isHost || settingsPending || value <= 0}
                         onClick={() => void handleRoleCountChange(role, value - 1)}
-                        style={stepBtnStyle(isHost && !settingsPending && value > 1)}
+                        style={stepBtnStyle(isHost && !settingsPending && value > 0)}
                       >
                         −
                       </button>
