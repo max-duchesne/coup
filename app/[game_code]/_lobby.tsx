@@ -18,6 +18,7 @@ import { usePlayer } from "@/lib/player";
 import {
   startGame,
   updateLobbySettings,
+  setLobbyPlayerOrder,
   ALL_ROLES,
   DEFAULT_ROLE_COUNTS,
   ROLE_LABELS,
@@ -59,6 +60,13 @@ export default function LobbyView() {
     DEFAULT_ROLE_COUNTS,
   );
   const [settingsPending, setSettingsPending] = useState(false);
+  const [randomizeTurnOrder, setRandomizeTurnOrder] = useState(true);
+
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOrderIds, setDragOrderIds] = useState<string[] | null>(null);
+  const displayedPlayers = dragOrderIds
+    ? (dragOrderIds.map((id) => players.find((p) => p.id === id)).filter(Boolean) as LobbyPlayer[])
+    : players;
 
   const isMobile = useMobile();
   const chatOpenRef = useRef(false);
@@ -114,13 +122,14 @@ export default function LobbyView() {
       if (!cancelledRef.current) {
         const { data: existingGame } = await supabase
           .from("games")
-          .select("cards_per_player, role_counts")
+          .select("cards_per_player, role_counts, randomize_turn_order")
           .eq("game_code", gameCode)
           .maybeSingle();
         if (existingGame && !cancelledRef.current) {
           setCardsPerPlayer(existingGame.cards_per_player);
           if (existingGame.role_counts)
             setRoleCounts(existingGame.role_counts as Record<Role, number>);
+          setRandomizeTurnOrder(existingGame.randomize_turn_order ?? true);
         }
       }
     })();
@@ -151,6 +160,7 @@ export default function LobbyView() {
           const row = payload.new as {
             cards_per_player?: number;
             role_counts?: Record<Role, number>;
+            randomize_turn_order?: boolean;
             status?: string;
           } | null;
           // Only apply settings updates for lobby rows, not in_progress rows
@@ -160,6 +170,8 @@ export default function LobbyView() {
               setCardsPerPlayer(row.cards_per_player);
             if (row.role_counts != null)
               setRoleCounts(row.role_counts);
+            if (row.randomize_turn_order != null)
+              setRandomizeTurnOrder(row.randomize_turn_order);
           }
         },
       )
@@ -229,7 +241,7 @@ export default function LobbyView() {
     setCardsPerPlayer(next);
     setSettingsPending(true);
     try {
-      await updateLobbySettings(gameCode, playerId, next, roleCounts);
+      await updateLobbySettings(gameCode, playerId, next, roleCounts, randomizeTurnOrder);
     } catch (err) {
       setLoadError(errMsg(err, "Failed to update settings"));
     } finally {
@@ -244,7 +256,20 @@ export default function LobbyView() {
     setRoleCounts(nextCounts);
     setSettingsPending(true);
     try {
-      await updateLobbySettings(gameCode, playerId, cardsPerPlayer, nextCounts);
+      await updateLobbySettings(gameCode, playerId, cardsPerPlayer, nextCounts, randomizeTurnOrder);
+    } catch (err) {
+      setLoadError(errMsg(err, "Failed to update settings"));
+    } finally {
+      setSettingsPending(false);
+    }
+  };
+
+  const handleRandomizeTurnOrderChange = async (value: boolean) => {
+    if (!isHost || !playerId) return;
+    setRandomizeTurnOrder(value);
+    setSettingsPending(true);
+    try {
+      await updateLobbySettings(gameCode, playerId, cardsPerPlayer, roleCounts, value);
     } catch (err) {
       setLoadError(errMsg(err, "Failed to update settings"));
     } finally {
@@ -256,7 +281,9 @@ export default function LobbyView() {
     if (!isHost || !allReady || startPending) return;
     setStartPending(true);
     try {
-      await startGame(gameCode, players.map((p) => p.id));
+      // players is already sorted by desiredSeatOrder (nulls last) then joined_at.
+      // When randomize=false that order is preserved; when true, startGame shuffles.
+      await startGame(gameCode, players.map((p) => p.id), randomizeTurnOrder);
       // Parent page router detects games INSERT and switches to game view.
     } catch (err) {
       setLoadError(
@@ -264,6 +291,44 @@ export default function LobbyView() {
       );
       setStartPending(false);
     }
+  };
+
+  const handleDragStart = (id: string) => {
+    setDraggingId(id);
+    setDragOrderIds(players.map((p) => p.id));
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!draggingId || draggingId === targetId) return;
+    setDragOrderIds((prev) => {
+      if (!prev) return prev;
+      const from = prev.indexOf(draggingId);
+      const to = prev.indexOf(targetId);
+      if (from === -1 || to === -1) return prev;
+      const next = [...prev];
+      next.splice(from, 1);
+      next.splice(to, 0, draggingId);
+      return next;
+    });
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const ids = dragOrderIds;
+    setDraggingId(null);
+    setDragOrderIds(null);
+    if (!ids) return;
+    try {
+      await setLobbyPlayerOrder(gameCode, ids);
+    } catch (err) {
+      setLoadError(errMsg(err, "Failed to update player order"));
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggingId(null);
+    setDragOrderIds(null);
   };
 
 
@@ -393,9 +458,11 @@ export default function LobbyView() {
                 Loading players…
               </div>
             ) : (
-              players.map((p, i) => {
+              displayedPlayers.map((p, i) => {
                 const online = onlineIds.has(p.id);
                 const isPlayerHost = p.id === hostId;
+                const isDraggable = isHost && !randomizeTurnOrder;
+                const isDraggingThis = draggingId === p.id;
                 const status = !online
                   ? { text: "Disconnected", color: M.muted }
                   : p.is_ready
@@ -405,6 +472,11 @@ export default function LobbyView() {
                 return (
                   <div
                     key={p.id}
+                    draggable={isDraggable}
+                    onDragStart={isDraggable ? () => handleDragStart(p.id) : undefined}
+                    onDragOver={isDraggable ? (e) => handleDragOver(e, p.id) : undefined}
+                    onDrop={isDraggable ? (e) => void handleDrop(e) : undefined}
+                    onDragEnd={isDraggable ? handleDragEnd : undefined}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -412,9 +484,17 @@ export default function LobbyView() {
                       padding: "12px 16px",
                       borderRadius: 12,
                       borderBottom:
-                        i < players.length - 1 ? `1px solid ${M.border}` : "none",
+                        i < displayedPlayers.length - 1 ? `1px solid ${M.border}` : "none",
+                      opacity: isDraggingThis ? 0.4 : 1,
+                      cursor: isDraggable ? "grab" : "default",
+                      transition: "opacity 0.15s",
                     }}
                   >
+                    {isDraggable && (
+                      <div style={{ color: M.muted, fontSize: 14, lineHeight: 1, userSelect: "none" }}>
+                        ⋮⋮
+                      </div>
+                    )}
                     <div style={{ width: 22, fontSize: 13, color: M.muted }}>
                       {String(i + 1).padStart(2, "0")}
                     </div>
@@ -495,6 +575,49 @@ export default function LobbyView() {
             >
               Game settings
             </div>
+            {/* Randomize turn order toggle */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 20,
+              }}
+            >
+              <div style={{ fontSize: 13, color: M.mutedHi, letterSpacing: "0.05em" }}>
+                Randomize turn order
+              </div>
+              <button
+                disabled={!isHost || settingsPending}
+                onClick={() => void handleRandomizeTurnOrderChange(!randomizeTurnOrder)}
+                style={{
+                  position: "relative",
+                  width: 44,
+                  height: 24,
+                  borderRadius: 12,
+                  border: `1px solid ${randomizeTurnOrder ? M.gold : M.border}`,
+                  background: randomizeTurnOrder ? M.gold : M.surface2,
+                  cursor: isHost && !settingsPending ? "pointer" : "not-allowed",
+                  opacity: isHost ? 1 : 0.4,
+                  flexShrink: 0,
+                  padding: 0,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 3,
+                    left: randomizeTurnOrder ? 22 : 3,
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    background: "white",
+                    transition: "left 0.15s",
+                  }}
+                />
+              </button>
+            </div>
+
             {/* Cards per player row */}
             {(() => {
               const value = cardsPerPlayer;

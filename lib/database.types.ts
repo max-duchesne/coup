@@ -144,7 +144,9 @@ export type Database = {
           pending_ambassador_draw: string[] | null
           pending_block_role: string | null
           pending_blocker_id: string | null
+          pending_challenger_id: string | null
           pending_target_id: string | null
+          randomize_turn_order: boolean
           role_counts: Json
           status: string
           turn_phase: string
@@ -163,7 +165,9 @@ export type Database = {
           pending_ambassador_draw?: string[] | null
           pending_block_role?: string | null
           pending_blocker_id?: string | null
+          pending_challenger_id?: string | null
           pending_target_id?: string | null
+          randomize_turn_order?: boolean
           role_counts?: Json
           status?: string
           turn_phase?: string
@@ -182,7 +186,9 @@ export type Database = {
           pending_ambassador_draw?: string[] | null
           pending_block_role?: string | null
           pending_blocker_id?: string | null
+          pending_challenger_id?: string | null
           pending_target_id?: string | null
+          randomize_turn_order?: boolean
           role_counts?: Json
           status?: string
           turn_phase?: string
@@ -206,6 +212,13 @@ export type Database = {
           {
             foreignKeyName: "games_pending_blocker_id_fkey"
             columns: ["pending_blocker_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "games_pending_challenger_id_fkey"
+            columns: ["pending_challenger_id"]
             isOneToOne: false
             referencedRelation: "players"
             referencedColumns: ["id"]
@@ -270,6 +283,7 @@ export type Database = {
       }
       players: {
         Row: {
+          desired_seat_order: number | null
           game_code: string
           id: string
           is_ready: boolean
@@ -277,6 +291,7 @@ export type Database = {
           name: string
         }
         Insert: {
+          desired_seat_order?: number | null
           game_code: string
           id: string
           is_ready?: boolean
@@ -284,6 +299,7 @@ export type Database = {
           name: string
         }
         Update: {
+          desired_seat_order?: number | null
           game_code?: string
           id?: string
           is_ready?: boolean
@@ -310,6 +326,15 @@ export type Database = {
         Returns: undefined
       }
       resolve_challenge: { Args: { p_game_code: string }; Returns: undefined }
+      reveal_or_back_down: {
+        Args: { p_game_code: string; p_reveal: boolean }
+        Returns: undefined
+      }
+      set_lobby_player_order: {
+        Args: { p_game_code: string; p_ordered_ids: string[] }
+        Returns: undefined
+      }
+      submit_challenge: { Args: { p_game_code: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never

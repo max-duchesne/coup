@@ -114,11 +114,6 @@ function EditableName({ initialName }: { initialName: string }) {
     if (editing) inputRef.current?.select();
   }, [editing]);
 
-  // Keep local value in sync if metadata changes from elsewhere.
-  useEffect(() => {
-    if (!editing) setValue(initialName);
-  }, [initialName, editing]);
-
   async function commit() {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -145,7 +140,7 @@ function EditableName({ initialName }: { initialName: string }) {
   if (!editing) {
     return (
       <button
-        onClick={() => setEditing(true)}
+        onClick={() => { setValue(initialName); setEditing(true); }}
         title="Click to edit"
         style={{
           background: "none",
