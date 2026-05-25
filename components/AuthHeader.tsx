@@ -6,19 +6,21 @@ import { useFormStatus } from "react-dom";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { setPlayerName } from "@/lib/player";
+import { initialsFor, useMyProfile } from "@/lib/profile";
+import { FONT_DISPLAY, M } from "@/lib/design";
 import { Pill, SmallLabel } from "@/components/ui";
-import { M } from "@/lib/design";
 import { signOut } from "@/app/login/actions";
 
 /**
  * Header widget showing the current user's display name plus a sign-out
- * button. Anonymous users get extra affordances: an inline name editor (so
- * they can rename without re-signing-in) and an "Upgrade" link to /login
- * where they can link a Google identity without losing their seat.
+ * button. Authenticated (non-guest) users also get a circular avatar
+ * linking to their profile page. Anonymous users keep the inline name
+ * editor and Upgrade link.
  */
 export function AuthHeader() {
   const [user, setUser] = useState<User | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const { profile } = useMyProfile();
 
   useEffect(() => {
     const supabase = createClient();
@@ -55,12 +57,14 @@ export function AuthHeader() {
   }
 
   const meta = (user.user_metadata ?? {}) as { full_name?: string; name?: string };
-  const displayName =
-    meta.full_name ??
-    meta.name ??
-    user.email ??
-    (user.is_anonymous ? "Guest" : "Player");
   const isAnon = Boolean(user.is_anonymous);
+  // Authenticated users prefer their profile username (matches what others see).
+  const displayName =
+    (!isAnon && profile?.username) ||
+    meta.full_name ||
+    meta.name ||
+    user.email ||
+    (isAnon ? "Guest" : "Player");
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -73,6 +77,17 @@ export function AuthHeader() {
       >
         {isAnon ? (
           <EditableName initialName={displayName} />
+        ) : profile ? (
+          <Link
+            href={`/profile/${user.id}`}
+            style={{
+              color: M.text,
+              fontSize: 14,
+              textDecoration: "none",
+            }}
+          >
+            {displayName}
+          </Link>
         ) : (
           <span style={{ color: M.text, fontSize: 14 }}>{displayName}</span>
         )}
@@ -82,6 +97,15 @@ export function AuthHeader() {
           </SmallLabel>
         )}
       </div>
+      {!isAnon && profile && (
+        <Link
+          href={`/profile/${user.id}`}
+          aria-label="View your profile"
+          style={{ textDecoration: "none", display: "inline-flex" }}
+        >
+          <InitialsAvatar name={profile.username} size={36} />
+        </Link>
+      )}
       <form action={signOut}>
         <SignOutButton />
       </form>
@@ -95,6 +119,42 @@ function SignOutButton() {
     <Pill type="submit" size="sm" disabled={pending}>
       {pending ? "Signing out…" : "Sign out"}
     </Pill>
+  );
+}
+
+/**
+ * Circular avatar showing 1–2 character initials derived from a name
+ * or username. Used for non-guest users in the header and on profile
+ * pages.
+ */
+export function InitialsAvatar({
+  name,
+  size = 36,
+}: {
+  name: string;
+  size?: number;
+}) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: `radial-gradient(circle at 35% 30%, ${M.surface2}, ${M.bg})`,
+        border: `1px solid ${M.borderHi}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: FONT_DISPLAY,
+        color: M.gold,
+        fontSize: Math.round(size * 0.38),
+        letterSpacing: "0.04em",
+        flexShrink: 0,
+        cursor: "pointer",
+      }}
+    >
+      {initialsFor(name)}
+    </div>
   );
 }
 
