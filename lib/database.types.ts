@@ -49,6 +49,45 @@ export type Database = {
           },
         ]
       }
+      friendships: {
+        Row: {
+          addressee_id: string
+          created_at: string
+          id: number
+          requester_id: string
+          status: string
+        }
+        Insert: {
+          addressee_id: string
+          created_at?: string
+          id?: never
+          requester_id: string
+          status: string
+        }
+        Update: {
+          addressee_id?: string
+          created_at?: string
+          id?: never
+          requester_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "friendships_addressee_id_fkey"
+            columns: ["addressee_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "friendships_requester_id_fkey"
+            columns: ["requester_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       game_events: {
         Row: {
           action: string
@@ -308,11 +347,33 @@ export type Database = {
         }
         Relationships: []
       }
+      profiles: {
+        Row: {
+          created_at: string
+          id: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          username?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      _ensure_profile: {
+        Args: { p_email: string; p_meta: Json; p_user_id: string }
+        Returns: undefined
+      }
       deal_initial_influences: {
         Args: { p_game_code: string }
         Returns: undefined
@@ -320,6 +381,26 @@ export type Database = {
       draw_ambassador_cards: {
         Args: { p_game_code: string }
         Returns: string[]
+      }
+      get_player_game_log: {
+        Args: { p_limit?: number; pid: string }
+        Returns: {
+          finish_position: number
+          finished_at: string
+          game_code: string
+          total_players: number
+        }[]
+      }
+      get_player_stats: {
+        Args: { p_player_id: string }
+        Returns: {
+          total_games: number
+          total_games_30d: number
+          total_wins: number
+          total_wins_30d: number
+          win_pct: number
+          win_pct_30d: number
+        }[]
       }
       lose_influence_and_resolve: {
         Args: { p_game_code: string; p_influence_id: number }
