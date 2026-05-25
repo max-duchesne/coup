@@ -57,8 +57,10 @@ Branch naming: `feat/`, `fix/`, `chore/`, `refactor/` + short kebab-case descrip
 ### Migration flow
 ```
 feature/xyz  →  PR to dev   →  merge  →  manually push migration to coup-dev
-    dev      →  PR to main  →  merge  →  GitHub integration auto-applies to coup (prod)
+    dev      →  PR to main  →  merge  →  MANUALLY apply pending migrations to coup (prod)
 ```
+
+**Heads-up:** the Supabase ↔ GitHub auto-apply integration is unreliable — it silently failed on two consecutive `dev→main` merges (2026-05-24/25). Treat prod migrations as a manual step until that's fixed.
 
 When a feature includes a migration:
 1. Write the migration file in `supabase/migrations/`
@@ -78,7 +80,26 @@ When a feature includes a migration:
 5. If a migration is included, note it explicitly in the PR description
 
 ### Shipping to Production
-When `dev` is stable, open a PR from `dev` → `main`. Merging auto-triggers Vercel deploy and auto-applies pending migrations to the `coup` Supabase project.
+When `dev` is stable, open a PR from `dev` → `main`. Merging auto-triggers a Vercel deploy. **Pending migrations do NOT auto-apply to prod** — you must push them manually right after the merge, or prod will be running app code against an older schema.
+
+```bash
+# 1. List what's missing on prod
+#    (use Supabase MCP list_migrations against prod project)
+#
+# Prod project ref: spprnhncckbjirgdnffg
+# Diff against supabase/migrations/ on main to find the gap.
+
+# 2. Apply each missing migration in timestamp order via Supabase MCP:
+#    mcp__supabase__apply_migration(project_id=spprnhncckbjirgdnffg, name=..., query=<file contents>)
+#
+# Do NOT use `supabase db push` against prod from your laptop — it would relink
+# the CLI away from coup-dev and risks accidental destructive operations.
+
+# 3. Verify on prod via Supabase MCP:
+#    - list_tables shows new tables
+#    - pg_proc shows new functions
+#    - Smoke-test the live site (see "Browser testing with Chrome DevTools MCP" below)
+```
 
 ---
 
@@ -230,30 +251,62 @@ Use the **Supabase MCP** to verify the schema looks correct after pushing. Prod 
 
 ## Testing & QA Protocol
 
-**No feature is done until it has been tested end-to-end.** Most bugs in a realtime multiplayer game only surface with 2+ concurrent sessions.
+**No feature is done until it has been tested end-to-end in a real browser.** Most bugs in a realtime multiplayer game only surface with 2+ concurrent sessions. Unit tests and TypeScript checks verify code correctness, not feature correctness — drive the actual UI before claiming done.
 
-### Multi-Window Testing Setup
-1. Open `http://localhost:3000` in **two browser contexts** (normal + incognito, or two `isolatedContext` Chrome DevTools pages) so each gets a distinct Supabase auth session
+### Browser testing with Chrome DevTools MCP
+
+This is the standard way to drive the app in this project. The MCP gives you isolated browser contexts (so two "players" can sit on the same machine with separate Supabase sessions), a11y-tree snapshots (so you click by stable `uid` instead of brittle CSS selectors), and direct console / network access.
+
+**Canonical multi-player flow:**
+
+```ts
+// 1. Spin up two isolated contexts so each gets its own auth session.
+mcp__chrome-devtools__new_page({ url: "http://localhost:3000/", isolatedContext: "player-a" })
+mcp__chrome-devtools__new_page({ url: "http://localhost:3000/", isolatedContext: "player-b" })
+
+// 2. Switch focus between them with select_page; take_snapshot returns the
+//    a11y tree with a unique `uid` for every interactive element.
+mcp__chrome-devtools__select_page({ pageId: <n> })
+mcp__chrome-devtools__take_snapshot()
+
+// 3. Drive the UI using uids from the latest snapshot — never guess.
+mcp__chrome-devtools__click({ uid: "..." })
+mcp__chrome-devtools__fill({ uid: "...", value: "..." })
+
+// 4. After each meaningful action:
+//    a. take_snapshot (or take_screenshot for visual confirm)
+//    b. list_console_messages({ types: ["error", "warn"] }) — must be clean
+//    c. Cross-check DB state via the Supabase MCP (see below)
+```
+
+**For prod smoke-testing**, point `new_page` at `https://mulekoup.vercel.app/` instead. Same recipe.
+
+**Account setup for testing:**
+- **Guest** is fastest for game-flow testing (no email needed).
+- For features that require **authenticated users** (profiles, friends, anything reading `auth.uid()` against `profiles`), sign up via Email. Both dev and prod have email confirmation enabled; bypass it in the DB:
+  ```sql
+  update auth.users set email_confirmed_at = now() where email = '<your test email>';
+  ```
+- **Prod rejects** `@example.com` addresses as invalid — use `@gmail.com` (or any real-looking domain) for prod smoke users.
+- **Always clean up** test accounts on prod when finished: `delete from auth.users where email = '<test email>'` (cascades the profile).
+
+**Generic "Action failed" toasts** in the game UI usually mean an RPC raised an exception that the `wrap()` helper swallowed. Tail Postgres logs via `mcp__supabase__get_logs(service="postgres")` to see the actual exception. (This is how the `submit_challenge` / `player_alive` signature bug surfaced.)
+
+### Multi-Window Testing Setup (fallback without MCP)
+1. Open `http://localhost:3000` in **two browser contexts** (normal + incognito) so each gets a distinct Supabase auth session
 2. Each window = a separate player
 3. Run through the full relevant flow: create lobby → join → ready up → start game → take turns through the changed action(s)
 4. Verify both windows reflect correct state in real time **without refreshing**
 
-### What to Check with MCP Tools
-
-**Chrome DevTools MCP** (run on each window):
-- Console: no errors or unhandled promise rejections
-- Network: Supabase Realtime WebSocket is connected and receiving messages
-- Application → Local Storage: player ID is stable
-
-**Supabase MCP** (verify DB state directly after each action):
-- Coins updated correctly
+### What to Check via Supabase MCP after each action
+- Coins updated correctly on `game_players`
 - `is_revealed` flipped correctly after losing influence
 - `current_turn_player_id` advanced to the right player
-- `game_events` has the correct entries (action, player_id, metadata)
+- `game_events` has the expected entries (`action`, `player_id`, `metadata`)
 - No orphaned rows in `player_influences` or `game_players`
-- **Tail Postgres logs** via `mcp__supabase__get_logs` when a UI action silently fails — generic toasts like "Action failed" usually mean an RPC raised an exception (missing function, RLS denial, FK violation)
+- No new ERROR rows in Postgres logs (`mcp__supabase__get_logs(service="postgres")`)
 
-**Vercel MCP**: tail function logs for any server-side errors
+**Vercel MCP**: tail function logs for server-side errors.
 
 ### Scenarios to Always Cover
 
@@ -271,11 +324,16 @@ Use the **Supabase MCP** to verify the schema looks correct after pushing. Prod 
 | Friend accept live arrival | UPDATE realtime event triggers list refresh on requester's open profile page (requires `REPLICA IDENTITY FULL`) |
 
 ### Checklist Before Marking Done
-- [ ] Tested with 2+ windows and distinct auth sessions
-- [ ] No console errors in any window
+- [ ] **Drove the actual UI in a real browser** (Chrome DevTools MCP), not just unit tests
+- [ ] Tested with 2+ isolated contexts and distinct auth sessions
+- [ ] `list_console_messages({ types: ["error","warn"] })` returns nothing on every window
 - [ ] DB rows match expected state (verified via Supabase MCP)
 - [ ] Realtime updates appear in all windows without a refresh
 - [ ] Behavior is correct from every affected player's perspective
-- [ ] No RLS violations in Supabase logs
+- [ ] No new ERROR rows in Postgres logs
 - [ ] `npm run build` passes
 - [ ] `npm run lint` passes
+
+### After merging dev → main
+- [ ] Apply any new migrations to prod via Supabase MCP (see "Shipping to Production")
+- [ ] Smoke-test the live `https://mulekoup.vercel.app` site with the Chrome DevTools MCP recipe above
