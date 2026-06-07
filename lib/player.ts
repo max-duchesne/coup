@@ -7,11 +7,11 @@ import { createClient } from "@/lib/supabase/client";
 export type Player = {
   /** `auth.uid()` for the signed-in user, or "" while loading / not signed in. */
   id: string;
-  /** Display name resolved from `user_metadata.full_name` with fallbacks. */
+  /** Display name: profile username for signed-in users, else `user_metadata.full_name`. */
   name: string;
   /** True if the user signed in via `signInAnonymously()`. */
   isAnonymous: boolean;
-  /** True until the initial auth check completes. */
+  /** True until auth (and profile, for non-guests) finishes loading. */
   loading: boolean;
 };
 
@@ -22,36 +22,40 @@ const INITIAL: Player = {
   loading: true,
 };
 
-function userToPlayer(user: User | null): Player {
-  if (!user) {
-    return { id: "", name: "", isAnonymous: false, loading: false };
-  }
+function metadataName(user: User): string {
   const meta = (user.user_metadata ?? {}) as {
     full_name?: string;
     name?: string;
   };
-  const name =
+  return (
     meta.full_name ??
     meta.name ??
     user.email?.split("@")[0] ??
-    (user.is_anonymous ? "Guest" : "Player");
+    (user.is_anonymous ? "Guest" : "Player")
+  );
+}
+
+function userToPlayer(user: User, profileUsername?: string | null): Player {
+  const isAnonymous = Boolean(user.is_anonymous);
+  const name =
+    (!isAnonymous && profileUsername) || metadataName(user);
   return {
     id: user.id,
     name,
-    isAnonymous: Boolean(user.is_anonymous),
+    isAnonymous,
     loading: false,
   };
 }
 
 /**
  * Returns the currently signed-in player. Identity is `auth.uid()`; the name
- * is read from `user_metadata.full_name` (set during sign-up for Google,
- * email, and guest flows).
+ * is the profile `username` for authenticated users, or `user_metadata.full_name`
+ * for guests (set during sign-in or via `setPlayerName`).
  *
  * Returns `{ id: "", name: "", loading: true }` during the initial auth
- * check. Once the proxy + Supabase confirm the session, the hook updates
- * with real values. Gate any presence-channel work on `!player.loading &&
- * player.id !== ""`.
+ * check (and profile fetch for non-guests). Once the proxy + Supabase confirm
+ * the session, the hook updates with real values. Gate any presence-channel
+ * work on `!player.loading && player.id !== ""`.
  *
  * The route proxy redirects unauthenticated requests to `/login`, so any
  * page that calls this hook can assume a session will be available by the
@@ -65,12 +69,31 @@ export function usePlayer(): Player {
     const supabase = createClient();
     let active = true;
 
+    async function resolve(user: User | null) {
+      if (!user) {
+        if (active) {
+          setPlayer({ id: "", name: "", isAnonymous: false, loading: false });
+        }
+        return;
+      }
+      if (user.is_anonymous) {
+        if (active) setPlayer(userToPlayer(user));
+        return;
+      }
+      const { data } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (active) setPlayer(userToPlayer(user, data?.username));
+    }
+
     supabase.auth.getUser().then(({ data }) => {
-      if (active) setPlayer(userToPlayer(data.user));
+      void resolve(data.user);
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setPlayer(userToPlayer(session?.user ?? null));
+      void resolve(session?.user ?? null);
     });
 
     return () => {
